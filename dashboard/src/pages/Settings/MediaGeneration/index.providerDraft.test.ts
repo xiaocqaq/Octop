@@ -112,13 +112,17 @@ describe("buildProviderDraft", () => {
 
   it("keeps the provider identity that is not part of the form", () => {
     const draft = buildProviderDraft(
-      provider({ id: "openai-default", provider: "openai", enabled: false }),
+      provider({
+        id: "openai-images-default",
+        provider: "openai_images",
+        enabled: false,
+      }),
       { display_name: "OpenAI" },
       {},
     );
 
-    expect(draft.id).toBe("openai-default");
-    expect(draft.provider).toBe("openai");
+    expect(draft.id).toBe("openai-images-default");
+    expect(draft.provider).toBe("openai_images");
     expect(draft.enabled).toBe(false);
   });
 });

@@ -552,9 +552,9 @@ export default function LoginPage() {
           ? publicUrl("logo_horizontal_white.png")
           : publicUrl("logo_horizontal_dark.png")
       }
-      alt="Octop"
+      alt="mxiao"
       style={{
-        height: 48,
+        height: 40,
         width: "auto",
         maxWidth: 260,
         objectFit: "contain",

@@ -168,6 +168,11 @@ export default defineConfig(({ mode }) => {
         // Include the offline fallback in the SW precache.
         includeAssets: [
           "offline.html",
+          "favico.svg",
+          "logo_mark.svg",
+          "octop-mascot-empty.png",
+          "octop-mascot-peek.webp",
+          "octop-mascot-type.webp",
           "logo_vertical_dark.svg",
           "logo_vertical_white.svg",
           "logo_horizontal_dark.png",

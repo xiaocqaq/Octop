@@ -21,7 +21,7 @@ dependencies = [
     "apscheduler>=3.10,<4",
     "argon2-cffi>=23.1",
     "pyjwt>=2.8",
-    "octop-harness[all]>=1.0.11",
+    "octop-harness[all]==1.0.11+mxiao.1",
     "octop-memory>=1.0.5",
     "lark-oapi>=1.7.3",
     "octop-gateway>=1.0.4",
@@ -87,6 +87,10 @@ knowledge-ocr = [
     "pymupdf>=1.24",
     "shapely>=2.2.0",
 ]
+
+# Keep the mxiao OpenAI Images adapter reproducible on reinstall.
+[tool.uv.sources]
+octop-harness = { path = "vendor/octop_harness-1.0.11+mxiao.1-py3-none-any.whl" }
 
 [dependency-groups]
 # PEP 735 dev group — installed by default on `uv sync`. Mirrors the

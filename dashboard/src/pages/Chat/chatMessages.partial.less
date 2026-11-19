@@ -1299,6 +1299,11 @@
   margin: 6px 0 0;
   padding: 0;
   list-style: none;
+
+  // An intrinsically sized list item must not exceed the chat column.
+  > li {
+    max-width: 100%;
+  }
 }
 
 .fileChangeRow {

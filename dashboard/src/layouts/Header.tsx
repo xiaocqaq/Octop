@@ -80,9 +80,9 @@ export default function Header({ onToggle, isMobile }: HeaderProps) {
         )}
         <img
           src={mobileLogoSrc}
-          alt="octop"
+          alt="mxiao"
           style={{
-            height: 36,
+            height: 26,
             width: "auto",
             maxWidth: 160,
             objectFit: "contain",

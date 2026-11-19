@@ -19,7 +19,7 @@ from octop.infra.errors import ErrorCode, OctopError
 if TYPE_CHECKING:
     from octop_harness import MediaGenerationConfig
 
-MediaProviderName = Literal["volcengine", "dashscope", "minimax"]
+MediaProviderName = Literal["volcengine", "dashscope", "minimax", "openai_images"]
 MediaTestKind = Literal["image", "video"]
 
 DEFAULT_PROVIDER_ID = "volcengine-default"
@@ -58,10 +58,17 @@ class MediaProviderPreset:
 
     @property
     def default_video_model(self) -> str:
-        return self.video_models[0]
+        return self.video_models[0] if self.video_models else ""
 
 
 MEDIA_PROVIDER_PRESETS: dict[MediaProviderName, MediaProviderPreset] = {
+    "openai_images": MediaProviderPreset(
+        provider="openai_images",
+        display_name="OpenAI Images (compatible)",
+        base_url="https://api.openai.com/v1",
+        image_models=("gpt-image-2",),
+        video_models=(),
+    ),
     "volcengine": MediaProviderPreset(
         provider="volcengine",
         display_name="Volcengine Ark",
@@ -208,6 +215,8 @@ def _validate_provider(item: MediaProviderUpdate) -> None:
         )
     if item.provider not in MEDIA_PROVIDER_PRESETS:
         raise _bad_args(f"unsupported media provider: {item.provider}")
+    if item.provider == "openai_images" and item.video_enabled:
+        raise _bad_args("OpenAI Images does not support video generation")
     if not item.display_name:
         raise _bad_args(f"display_name is required for provider {item.id}")
     parsed = urlsplit(item.base_url)
@@ -223,6 +232,8 @@ def _validate_provider(item: MediaProviderUpdate) -> None:
 
 def _probe_url(provider: MediaProviderName, base_url: str) -> str:
     base = base_url.rstrip("/")
+    if provider == "openai_images":
+        return f"{base}/models"
     if provider == "volcengine":
         parsed = urlsplit(base)
         return urlunsplit((parsed.scheme, parsed.netloc, "/ping", "", ""))

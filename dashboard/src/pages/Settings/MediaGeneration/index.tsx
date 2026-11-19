@@ -102,11 +102,14 @@ export function buildProviderDraft(
   editingProvider: MediaProviderDraft,
   validated: Partial<ProviderFormValues>,
   stored: Partial<ProviderFormValues>,
+  supportsVideo = true,
 ): MediaProviderDraft {
   const merged = { ...stored, ...validated };
   return {
     ...editingProvider,
     ...validated,
+    video_enabled:
+      supportsVideo && (merged.video_enabled ?? editingProvider.video_enabled),
     display_name: trimmedFormString(validated.display_name),
     base_url: trimmedFormString(validated.base_url),
     image_model: trimmedFormString(merged.image_model),
@@ -175,7 +178,10 @@ function normalizeRoutes(
 }
 
 function providerLogo(provider: MediaProviderName): string {
-  return getProviderLogo(provider) ?? customProviderLogo;
+  return (
+    getProviderLogo(provider === "openai_images" ? "openai" : provider) ??
+    customProviderLogo
+  );
 }
 
 export function MediaGenerationSettingsPanel() {
@@ -257,7 +263,7 @@ export function MediaGenerationSettingsPanel() {
         enabled: true,
         base_url: preset.base_url,
         image_enabled: true,
-        video_enabled: true,
+        video_enabled: preset.video_models.length > 0,
         image_model: preset.image_models[0] || "",
         video_model: preset.video_models[0] || "",
         api_key_set: false,
@@ -315,7 +321,12 @@ export function MediaGenerationSettingsPanel() {
       // unmount when their tool switch is off. Read the preserved store values
       // back in so a disabled tool keeps the model it was configured with.
       const stored = form.getFieldsValue(true) as Partial<ProviderFormValues>;
-      return buildProviderDraft(editingProvider, values, stored);
+      return buildProviderDraft(
+        editingProvider,
+        values,
+        stored,
+        (presetMap.get(editingProvider.provider)?.video_models.length ?? 0) > 0,
+      );
     } catch {
       return null;
     }
@@ -445,7 +456,9 @@ export function MediaGenerationSettingsPanel() {
     ? editingProvider.api_key_set || Boolean(watchedApiKey.trim())
     : false;
   const modalImageEnabled = Form.useWatch("image_enabled", form) ?? true;
-  const modalVideoEnabled = Form.useWatch("video_enabled", form) ?? true;
+  const modalSupportsVideo = (modalPreset?.video_models.length ?? 0) > 0;
+  const modalVideoEnabled =
+    (Form.useWatch("video_enabled", form) ?? true) && modalSupportsVideo;
 
   if (loading || !config) {
     return <Text type="secondary">{t("mediaGeneration.loading")}</Text>;
@@ -786,18 +799,20 @@ export function MediaGenerationSettingsPanel() {
                         {preset.image_models[0]}
                       </span>
                     </div>
-                    <div className={styles.detailRow}>
-                      <span className={styles.detailLabel}>
-                        <Video size={13} />
-                        {t("mediaGeneration.video")}
-                      </span>
-                      <span
-                        className={styles.detailValue}
-                        title={preset.video_models[0]}
-                      >
-                        {preset.video_models[0]}
-                      </span>
-                    </div>
+                    {preset.video_models.length > 0 && (
+                      <div className={styles.detailRow}>
+                        <span className={styles.detailLabel}>
+                          <Video size={13} />
+                          {t("mediaGeneration.video")}
+                        </span>
+                        <span
+                          className={styles.detailValue}
+                          title={preset.video_models[0]}
+                        >
+                          {preset.video_models[0]}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
                 <div className={styles.cardFooter}>
@@ -879,6 +894,11 @@ export function MediaGenerationSettingsPanel() {
           <Form.Item
             name="base_url"
             label={t("mediaGeneration.baseUrl")}
+            extra={
+              editingProvider?.provider === "openai_images"
+                ? t("mediaGeneration.openaiImagesBaseUrlHint")
+                : undefined
+            }
             rules={[{ required: true, type: "url" }]}
           >
             <Input />
@@ -944,29 +964,39 @@ export function MediaGenerationSettingsPanel() {
               )}
             </Card>
 
-            <Card size="small">
-              <Space style={{ width: "100%", justifyContent: "space-between" }}>
-                <Text strong>{t("mediaGeneration.enableVideo")}</Text>
-                <Form.Item name="video_enabled" valuePropName="checked" noStyle>
-                  <Switch size="small" />
-                </Form.Item>
-              </Space>
-              {modalVideoEnabled && (
-                <Form.Item
-                  name="video_model"
-                  label={t("mediaGeneration.videoModel")}
-                  style={{ marginTop: 12, marginBottom: 0 }}
-                  rules={[{ required: true, whitespace: true }]}
+            {modalSupportsVideo && (
+              <Card size="small">
+                <Space
+                  style={{ width: "100%", justifyContent: "space-between" }}
                 >
-                  <AutoComplete
-                    options={(modalPreset?.video_models ?? []).map((model) => ({
-                      value: model,
-                    }))}
-                    placeholder={t("mediaGeneration.customModelPlaceholder")}
-                  />
-                </Form.Item>
-              )}
-            </Card>
+                  <Text strong>{t("mediaGeneration.enableVideo")}</Text>
+                  <Form.Item
+                    name="video_enabled"
+                    valuePropName="checked"
+                    noStyle
+                  >
+                    <Switch size="small" />
+                  </Form.Item>
+                </Space>
+                {modalVideoEnabled && (
+                  <Form.Item
+                    name="video_model"
+                    label={t("mediaGeneration.videoModel")}
+                    style={{ marginTop: 12, marginBottom: 0 }}
+                    rules={[{ required: true, whitespace: true }]}
+                  >
+                    <AutoComplete
+                      options={(modalPreset?.video_models ?? []).map(
+                        (model) => ({
+                          value: model,
+                        }),
+                      )}
+                      placeholder={t("mediaGeneration.customModelPlaceholder")}
+                    />
+                  </Form.Item>
+                )}
+              </Card>
+            )}
           </div>
 
           <div className={styles.testActions}>

@@ -168,6 +168,16 @@ def test_disabled_media_generation_does_not_build_harness_config(
             "https://dashscope.aliyuncs.com/api/v1/models?page_no=1&page_size=1",
         ),
         (
+            "openai_images",
+            "https://images.example.test/custom/v1",
+            "https://images.example.test/custom/v1/models",
+        ),
+        (
+            "openai_images",
+            "https://images.example.test/custom",
+            "https://images.example.test/custom/models",
+        ),
+        (
             "minimax",
             "https://api.minimax.cn",
             "https://api.minimax.cn/v1/models",
@@ -200,3 +210,56 @@ async def test_verify_media_credentials_uses_provider_probe(
         "url": expected_url,
         "auth": "Bearer provider-test-key",
     }
+
+
+def test_openai_images_provider_round_trips_with_custom_model(store) -> None:
+    media, _, _ = store
+    view = media.save(
+        enabled=True,
+        providers=[
+            MediaProviderUpdate(
+                id="gpt-image-main",
+                provider="openai_images",
+                display_name="OpenAI Images",
+                enabled=True,
+                base_url="https://images.example.test/v1",
+                image_enabled=True,
+                video_enabled=False,
+                image_model="gpt-image-2-custom",
+                video_model="",
+                api_key="test-image-key",
+            )
+        ],
+        default_image_provider="gpt-image-main",
+        default_video_provider=None,
+    )
+    assert view.configured
+    assert media.load().providers[0].image_model == "gpt-image-2-custom"
+    assert media.load().providers[0].video_model == ""
+    assert media.api_key("gpt-image-main") == "test-image-key"
+
+
+def test_openai_images_rejects_video_route(store) -> None:
+    media, _, _ = store
+    from octop.infra.errors import OctopError
+
+    with pytest.raises(OctopError, match="does not support video"):
+        media.save(
+            enabled=True,
+            providers=[
+                MediaProviderUpdate(
+                    id="gpt-images",
+                    provider="openai_images",
+                    display_name="Images",
+                    enabled=True,
+                    base_url="https://api.openai.com/v1",
+                    image_enabled=True,
+                    video_enabled=True,
+                    image_model="gpt-image-2",
+                    video_model="unsupported",
+                    api_key="test-key",
+                )
+            ],
+            default_image_provider="gpt-images",
+            default_video_provider=None,
+        )

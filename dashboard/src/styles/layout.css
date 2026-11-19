@@ -583,6 +583,23 @@ html[data-theme="dark"] .octop-ant-switch-checked {
   background: var(--fn-color-brand) !important;
 }
 
+/* iOS zooms small text controls when focused. Apply to touch-capable devices
+   (including landscape), and portals outside #root. Important beats component
+   and inline font sizes without disabling accessible pinch-to-zoom. */
+@media (any-pointer: coarse) {
+  html
+    input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):not(
+      [type="range"]
+    ):not([type="color"]):not([type="button"]):not([type="submit"]):not(
+      [type="reset"]
+    ):not([type="image"]):not([type="file"]),
+  html textarea,
+  html select,
+  html [contenteditable]:not([contenteditable="false"]) {
+    font-size: 16px !important;
+  }
+}
+
 /* ---- Mobile responsive ---- */
 @media (max-width: 767px) {
   html {

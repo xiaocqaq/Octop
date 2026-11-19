@@ -89,6 +89,7 @@ async def test_media_provider_presets_include_all_p0_adapters(
 
     assert response.status_code == 200, response.text
     assert [item["provider"] for item in response.json()] == [
+        "openai_images",
         "volcengine",
         "dashscope",
         "minimax",
@@ -100,3 +101,34 @@ async def test_media_provider_presets_include_all_p0_adapters(
     assert "qwen-image-3.0-pro" in presets["dashscope"]["image_models"]
     assert "wan3.0-video-prime" in presets["dashscope"]["video_models"]
     assert "image-01-live" in presets["minimax"]["image_models"]
+    assert presets["openai_images"]["image_models"] == ["gpt-image-2"]
+    assert presets["openai_images"]["video_models"] == []
+
+
+@pytest.mark.asyncio
+async def test_openai_images_api_saves_custom_endpoint_and_model(env_admin_client) -> None:
+    client, auth = env_admin_client
+    provider = {
+        **_provider_body(api_key="test-openai-images-key"),
+        "id": "openai-images-main",
+        "provider": "openai_images",
+        "display_name": "OpenAI Images",
+        "base_url": "https://images.example.test/v1",
+        "image_model": "gpt-image-2-custom",
+        "video_model": "",
+    }
+    response = await client.put(
+        "/api/admin/media-generation",
+        headers=auth,
+        json={
+            "enabled": True,
+            "providers": [provider],
+            "default_image_provider": provider["id"],
+            "default_video_provider": None,
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["configured"] is True
+    assert response.json()["providers"][0]["provider"] == "openai_images"
+    assert response.json()["providers"][0]["image_model"] == "gpt-image-2-custom"
+    assert "test-openai-images-key" not in response.text

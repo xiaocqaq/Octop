@@ -4,7 +4,14 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import AvatarDropdown from "../components/AvatarDropdown";
 import CurrentVersionBadge from "../components/CurrentVersionBadge";
-import { ArrowLeftRight, ChevronDown, PanelLeftClose, X } from "lucide-react";
+import {
+  ArrowLeftRight,
+  ChevronDown,
+  PanelLeftClose,
+  Plus,
+  X,
+} from "lucide-react";
+import { useAgent } from "../context/AgentContext";
 import cx from "classnames";
 import { useTheme } from "../context/ThemeContext";
 import { useLayoutMode } from "../context/LayoutModeContext";
@@ -148,6 +155,8 @@ function NavItemButton({
   isMobile,
   onNavigate,
   onToggleChatRail,
+  onNewChat,
+  newChatDisabled,
   showChatRailToggle,
   chatRailOpen,
   role,
@@ -159,6 +168,8 @@ function NavItemButton({
   isMobile?: boolean;
   onNavigate: (path: string) => void;
   onToggleChatRail?: () => void;
+  onNewChat?: () => void;
+  newChatDisabled?: boolean;
   showChatRailToggle?: boolean;
   chatRailOpen?: boolean;
   role: string | null;
@@ -202,7 +213,8 @@ function NavItemButton({
             : "var(--fn-text-secondary)",
           fontSize: typeSize(14, isMobile),
           fontWeight: 400,
-          paddingRight: showToggle ? 4 : 12,
+          paddingRight:
+            showToggle || (item.key === "chat" && onNewChat) ? 4 : 12,
         }}
       >
         <span
@@ -254,6 +266,21 @@ function NavItemButton({
           )}
         </span>
       </button>
+      {item.key === "chat" && onNewChat ? (
+        <button
+          type="button"
+          className={styles.chatRailExpandBtn}
+          onClick={(event) => {
+            event.stopPropagation();
+            onNewChat();
+          }}
+          disabled={newChatDisabled}
+          aria-label={t("chatWelcome.newChat", "新建对话")}
+          title={t("chatWelcome.newChat", "新建对话")}
+        >
+          <Plus size={15} strokeWidth={1.8} aria-hidden />
+        </button>
+      ) : null}
       {showToggle ? (
         <button
           type="button"
@@ -279,6 +306,8 @@ function NavList({
   selectedKey,
   onNavigate,
   onToggleChatRail,
+  onNewChat,
+  newChatDisabled,
   showChatRailToggle,
   chatRailOpen,
   isMobile,
@@ -292,6 +321,8 @@ function NavList({
   selectedKey: string;
   onNavigate: (path: string) => void;
   onToggleChatRail?: () => void;
+  onNewChat?: () => void;
+  newChatDisabled?: boolean;
   showChatRailToggle?: boolean;
   chatRailOpen?: boolean;
   isMobile?: boolean;
@@ -350,6 +381,8 @@ function NavList({
                     isMobile={isMobile}
                     onNavigate={onNavigate}
                     onToggleChatRail={onToggleChatRail}
+                    onNewChat={onNewChat}
+                    newChatDisabled={newChatDisabled}
                     showChatRailToggle={showChatRailToggle}
                     chatRailOpen={chatRailOpen}
                     role={role}
@@ -394,6 +427,8 @@ function NavList({
                     isMobile={isMobile}
                     onNavigate={onNavigate}
                     onToggleChatRail={onToggleChatRail}
+                    onNewChat={onNewChat}
+                    newChatDisabled={newChatDisabled}
                     showChatRailToggle={showChatRailToggle}
                     chatRailOpen={chatRailOpen}
                     role={role}
@@ -429,6 +464,14 @@ export default function Sidebar({
   const { layoutMode, minimalPane, setMinimalPane } = useLayoutMode();
   const isMinimal = layoutMode === "minimal";
   const onChatPath = isChatPath(location.pathname);
+  const { activeAgentId } = useAgent();
+  const currentExpertId =
+    location.pathname.match(/^\/chat\/([^/]+)/)?.[1] ?? activeAgentId;
+  const handleNewChat = useCallback(() => {
+    if (!currentExpertId) return;
+    navigate(`/chat/${currentExpertId}`, { state: { newChat: true } });
+    if (isMobile) onToggle();
+  }, [currentExpertId, navigate, isMobile, onToggle]);
   const [chatSidebarOpen, setChatSidebarOpen] = useChatSidebarOpen();
   const showChatRailToggle = !isMinimal;
   const chatRailOpen = showChatRailToggle && onChatPath && chatSidebarOpen;
@@ -521,12 +564,12 @@ export default function Sidebar({
     <>
       <img
         src={isRailCollapsed ? publicUrl("logo_mark.svg") : wordmarkSrc}
-        alt="Octop"
+        alt="mxiao"
         className={isRailCollapsed ? styles.brandMarkCollapsed : undefined}
         style={{
-          height: isRailCollapsed ? 26 : isMobile ? 38 : 36,
+          height: isRailCollapsed ? 22 : isMobile ? 28 : 26,
           width: "auto",
-          maxWidth: isRailCollapsed ? 36 : isMobile ? 190 : 160,
+          maxWidth: isRailCollapsed ? 28 : isMobile ? 136 : 124,
           objectFit: "contain",
           display: "block",
           flexShrink: 0,
@@ -637,6 +680,8 @@ export default function Sidebar({
       selectedKey={selectedKey}
       onNavigate={handleNavigate}
       onToggleChatRail={handleToggleChatRail}
+      onNewChat={handleNewChat}
+      newChatDisabled={!currentExpertId}
       showChatRailToggle={showChatRailToggle}
       chatRailOpen={chatRailOpen}
       isMobile={isMobile}
@@ -679,6 +724,8 @@ export default function Sidebar({
               isMobile={isMobile}
               isGroupCollapsed={isGroupCollapsed}
               toggleGroup={toggleGroup}
+              onNewChat={handleNewChat}
+              newChatDisabled={!currentExpertId}
               sectionFilter="primary"
             />
             {paneToggle}
