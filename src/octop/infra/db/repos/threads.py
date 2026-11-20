@@ -54,6 +54,11 @@ class ThreadRow:
     pending_plan_path: str | None = None
     hitl_policy: str | None = None
     contributed: bool = False
+    side_chat: bool = False
+    source_thread_id: str | None = None
+    copied_messages: int = 0
+    expires_at: int | None = None
+    gc_claimed_at: int | None = None
 
     @classmethod
     def from_row(cls, r: DbRow) -> ThreadRow:
@@ -96,6 +101,11 @@ class ThreadRow:
             pending_plan_path=str(pending_plan_path) if pending_plan_path else None,
             hitl_policy=str(hitl_policy) if hitl_policy else None,
             contributed=contributed,
+            side_chat=bool(r["side_chat"]),
+            source_thread_id=r["source_thread_id"],
+            copied_messages=int(r["copied_messages"]),
+            expires_at=r["expires_at"],
+            gc_claimed_at=r["gc_claimed_at"],
         )
 
 
@@ -173,13 +183,17 @@ class ThreadRepo:
         session_key: str,
         title: str | None = None,
         last_active: int | None = None,
+        side_chat: bool = False,
+        source_thread_id: str | None = None,
+        copied_messages: int = 0,
+        expires_at: int | None = None,
     ) -> None:
         ts = now_ts()
         with self._db.transaction() as conn:
             conn.execute(
                 "INSERT INTO threads(thread_id, agent_id, user_id, channel_type, "
-                "session_key, title, last_active, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "session_key, title, last_active, created_at, side_chat, source_thread_id, "
+                "copied_messages, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     thread_id,
                     agent_id,
@@ -189,6 +203,10 @@ class ThreadRepo:
                     clip_thread_title(title) if title else None,
                     ts if last_active is None else last_active,
                     ts,
+                    bool_int(side_chat),
+                    source_thread_id,
+                    copied_messages,
+                    expires_at,
                 ),
             )
             conn.execute(
@@ -260,7 +278,7 @@ class ThreadRepo:
         # instead of sinking below every previously active chat.
         with self._db.connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM threads WHERE agent_id = ? "
+                "SELECT * FROM threads WHERE agent_id = ? AND expires_at IS NULL "
                 "ORDER BY pinned DESC, "
                 "CASE WHEN last_active > 0 THEN last_active ELSE created_at END DESC, "
                 "thread_id DESC LIMIT ?",
@@ -273,7 +291,7 @@ class ThreadRepo:
     ) -> list[ThreadRow]:
         with self._db.connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM threads WHERE agent_id = ? AND user_id = ? "
+                "SELECT * FROM threads WHERE agent_id = ? AND user_id = ? AND expires_at IS NULL "
                 "ORDER BY pinned DESC, "
                 "CASE WHEN last_active > 0 THEN last_active ELSE created_at END DESC, "
                 "thread_id DESC LIMIT ?",
@@ -285,14 +303,60 @@ class ThreadRepo:
         """Own threads plus conversations contributed to this shared expert."""
         with self._db.connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM threads WHERE agent_id = ? "
-                "AND (user_id = ? OR contributed = 1) "
+                "SELECT * FROM threads WHERE agent_id = ? AND expires_at IS NULL "
+                "AND (user_id = ? OR (contributed = 1 AND side_chat = 0)) "
                 "ORDER BY pinned DESC, "
                 "CASE WHEN last_active > 0 THEN last_active ELSE created_at END DESC, "
                 "thread_id DESC LIMIT ?",
                 (agent_id, user_id, limit),
             ).fetchall()
         return map_rows(rows, ThreadRow)
+
+    def persist_side_chat(self, thread_id: str, *, now: int) -> bool:
+        """CAS against expiry/GC; already persisted side chats are idempotent."""
+        with self._db.transaction() as conn:
+            result = conn.execute(
+                "UPDATE threads SET expires_at = NULL WHERE thread_id = ? AND side_chat = 1 "
+                "AND gc_claimed_at IS NULL AND (expires_at IS NULL OR expires_at > ?)",
+                (thread_id, now),
+            )
+            return bool(result.rowcount == 1)
+
+    def expired_side_chats(self, *, now: int, limit: int = 50) -> list[ThreadRow]:
+        with self._db.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM threads WHERE side_chat = 1 AND expires_at <= ? "
+                "ORDER BY expires_at LIMIT ?",
+                (now, limit),
+            ).fetchall()
+        return map_rows(rows, ThreadRow)
+
+    def claim_temporary_side_chat(self, thread_id: str, *, now: int) -> bool:
+        """Claim an unpersisted side chat for an explicit discard."""
+        with self._db.transaction() as conn:
+            result = conn.execute(
+                "UPDATE threads SET gc_claimed_at = ? WHERE thread_id = ? "
+                "AND side_chat = 1 AND expires_at IS NOT NULL AND gc_claimed_at IS NULL",
+                (now, thread_id),
+            )
+            return bool(result.rowcount == 1)
+
+    def claim_expired_side_chat(self, thread_id: str, *, now: int) -> bool:
+        with self._db.transaction() as conn:
+            result = conn.execute(
+                "UPDATE threads SET gc_claimed_at = ? WHERE thread_id = ? "
+                "AND side_chat = 1 AND expires_at <= ? "
+                "AND (gc_claimed_at IS NULL OR gc_claimed_at < ?)",
+                (now, thread_id, now, now - 300),
+            )
+            return bool(result.rowcount == 1)
+
+    def release_side_chat_claim(self, thread_id: str, *, claimed_at: int) -> None:
+        with self._db.transaction() as conn:
+            conn.execute(
+                "UPDATE threads SET gc_claimed_at = NULL WHERE thread_id = ? AND gc_claimed_at = ?",
+                (thread_id, claimed_at),
+            )
 
     def set_contributed(self, thread_id: str, contributed: bool) -> None:
         with self._db.transaction() as conn:
@@ -304,7 +368,7 @@ class ThreadRepo:
     def list_by_session(self, *, session_key: str, limit: int = 50) -> list[ThreadRow]:
         with self._db.connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM threads WHERE session_key = ? "
+                "SELECT * FROM threads WHERE session_key = ? AND expires_at IS NULL "
                 "ORDER BY "
                 "CASE WHEN last_active > 0 THEN last_active ELSE created_at END DESC, "
                 "thread_id DESC LIMIT ?",
@@ -320,7 +384,7 @@ class ThreadRepo:
         """
         with self._db.connect() as conn:
             row = conn.execute(
-                "SELECT * FROM threads WHERE session_key = ? AND last_active > 0 "
+                "SELECT * FROM threads WHERE session_key = ? AND last_active > 0 AND expires_at IS NULL "
                 "ORDER BY last_active DESC, thread_id DESC LIMIT 1",
                 (session_key,),
             ).fetchone()

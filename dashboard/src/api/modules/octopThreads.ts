@@ -60,6 +60,9 @@ export interface OctopThread {
   session_mode?: string | null;
   pending_plan_path?: string | null;
   hitl_policy?: HitlSessionPolicy | null;
+  /** Isolated branch; temporary until expires_at is cleared by Save. */
+  side_chat?: boolean;
+  expires_at?: number | null;
   /** Legacy path list (compat). Prefer ``artifact_refs`` when present. */
   artifacts?: Array<string | ThreadArtifact>;
   /** Structured refs with producer ``agent_id``. */
@@ -264,12 +267,37 @@ export const octopThreadsApi = {
       { method: "PATCH", body: JSON.stringify(body) },
     ),
 
-  delete: (agentId: string, threadId: string, compact: boolean) =>
+  delete: (
+    agentId: string,
+    threadId: string,
+    compact: boolean,
+    temporaryOnly = false,
+  ) =>
     request<ThreadDeleteResult>(
       `/agents/${encodeURIComponent(agentId)}/threads/${encodeURIComponent(
         threadId,
-      )}?compact=${compact ? "true" : "false"}`,
+      )}?compact=${compact ? "true" : "false"}${
+        temporaryOnly ? "&temporary_only=true" : ""
+      }`,
       { method: "DELETE" },
+    ),
+
+  createSideChat: (agentId: string, threadId: string) =>
+    request<
+      OctopThread & { source_thread_id: string; copied_messages: number }
+    >(
+      `/agents/${encodeURIComponent(agentId)}/threads/${encodeURIComponent(
+        threadId,
+      )}/side-chat`,
+      { method: "POST" },
+    ),
+
+  persistSideChat: (agentId: string, threadId: string) =>
+    request<OctopThread>(
+      `/agents/${encodeURIComponent(agentId)}/threads/${encodeURIComponent(
+        threadId,
+      )}/persist`,
+      { method: "POST" },
     ),
 
   fork: (

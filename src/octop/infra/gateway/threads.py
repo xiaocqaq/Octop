@@ -115,6 +115,7 @@ class ThreadRegistry:
         self._sessions = session_repo
         self._threads = thread_repo
         self._lock = asyncio.Lock()
+        self.snapshotting_threads: set[str] = set()
 
     def replace_repos(self, *, session_repo: SessionRepo, thread_repo: ThreadRepo) -> None:
         """Point at repos from a rebound control-plane pool."""
@@ -542,6 +543,8 @@ def thread_visible_to(row: ThreadRow, user_id: int) -> bool:
     Rows that predate the column, and test fakes, have no ``contributed`` flag.
     Those stay private to the owner.
     """
+    if getattr(row, "side_chat", False):
+        return row.user_id == user_id
     return row.user_id == user_id or bool(getattr(row, "contributed", False))
 
 

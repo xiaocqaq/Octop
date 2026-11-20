@@ -285,3 +285,87 @@ it("reconnects by subscribing without resending the user message", async () => {
   );
   expect(store.getSnapshot(session).isStreaming).toBe(false);
 });
+
+it("reconnects main and side panes independently without changing main focus", async () => {
+  vi.useFakeTimers();
+  const main = `${session}-main`;
+  store.setFocusedChatSession(main);
+  const releaseSide = store.registerVisibleChatSession(session);
+  try {
+    const mainTurn = store.sendTurn(
+      main,
+      "main question",
+      "agent",
+      "",
+      undefined,
+      undefined,
+      null,
+      main,
+    );
+    const sideTurn = store.sendTurn(
+      session,
+      "side question",
+      "agent",
+      "",
+      undefined,
+      undefined,
+      null,
+      session,
+    );
+    await Promise.resolve();
+    const mainSocket = Socket.instances[0];
+    const sideSocket = Socket.instances[1];
+    mainSocket.frame({ type: "token", content: "main" });
+    sideSocket.frame({ type: "token", content: "side" });
+    mainSocket.close();
+    sideSocket.close();
+    await Promise.all([mainTurn, sideTurn]);
+    await vi.advanceTimersByTimeAsync(400);
+    expect(store.getFocusedChatSession()).toBe(main);
+    expect(Socket.instances).toHaveLength(4);
+    const subscriptions = Socket.instances
+      .slice(2)
+      .map((socket) => JSON.parse(socket.sent[0]));
+    expect(subscriptions.map((row) => row.thread_id).sort()).toEqual(
+      [main, session].sort(),
+    );
+    expect(subscriptions.every((row) => row.type === "subscribe")).toBe(true);
+    expect(store.getSnapshot(main).messages.at(-1)?.content).toBe("main");
+    expect(store.getSnapshot(session).messages.at(-1)?.content).toBe("side");
+  } finally {
+    releaseSide();
+    store.removeSession(main);
+    store.setFocusedChatSession(null);
+  }
+});
+
+it("keeps a side pane visible until its last registration is released", async () => {
+  vi.useFakeTimers();
+  store.setFocusedChatSession(`${session}-main`);
+  const releaseFirst = store.registerVisibleChatSession(session);
+  const releaseLast = store.registerVisibleChatSession(session);
+  try {
+    releaseFirst();
+    releaseFirst();
+    const turn = store.sendTurn(
+      session,
+      "side question",
+      "agent",
+      "",
+      undefined,
+      undefined,
+      null,
+      session,
+    );
+    await Promise.resolve();
+    Socket.instances[0].frame({ type: "token", content: "side" });
+    Socket.instances[0].close();
+    await turn;
+    await vi.advanceTimersByTimeAsync(400);
+    expect(Socket.instances).toHaveLength(2);
+    expect(JSON.parse(Socket.instances[1].sent[0]).type).toBe("subscribe");
+  } finally {
+    releaseLast();
+    store.setFocusedChatSession(null);
+  }
+});

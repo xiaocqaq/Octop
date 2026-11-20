@@ -235,6 +235,30 @@ approval card. A park older than 30 minutes is discarded (`park_expired`).
 | `DELETE` | `/agents/{id}/chat/sessions/{thread_id}` | owner | `204` (archives the active row) |
 | `GET`    | `/agents/{id}/chat/sessions/{thread_id}/history` | owner | paginated message history; `turn_active` tells a reconnecting client whether to re-`subscribe` over the chat WebSocket |
 
+### Side chats
+
+| Method | Path | Auth | Notes |
+|--------|------|------|-------|
+| `POST` | `/agents/{id}/threads/{thread_id}/side-chat` | owner | Snapshot the complete effective context, including any compaction summary, into an isolated temporary thread. No request body. |
+| `POST` | `/agents/{id}/threads/{thread_id}/persist` | owner | Save a live side chat permanently; idempotent. No request body. |
+| `DELETE` | `/agents/{id}/threads/{thread_id}` | owner | Explicitly close a thread; checkpoint cleanup precedes metadata deletion. Failed cleanup can be retried. Query `temporary_only=true` discards only an unpersisted side chat; saved or ordinary threads are left intact. |
+
+Creation and persistence return thread metadata plus `side_chat: true`,
+`source_thread_id`, `copied_messages`, and `expires_at` (Unix seconds, or `null`
+after persistence). Temporary side chats expire exactly 24 hours after creation
+and remain hidden from regular thread lists. Persistence makes them visible while
+retaining their side-chat identity and independent session route. Neither action
+changes the dashboard's main thread binding. The source must belong to the acting
+user and agent and have no active turn or pending human approval. Empty contexts
+and contexts without an assistant reply are valid snapshots.
+
+Expired side chats cannot send or persist. Cleanup runs on thread requests and
+periodically; failed checkpoint cleanup keeps metadata for a later retry. Saving
+and cleanup claim the row atomically, so cleanup cannot remove a saved thread. Clients should send `temporary_only=true` when discarding a temporary side-chat view after a persist request; this remains safe if the persist response was lost. A failed temporary discard releases its claim for retry.
+Dashboard WebSocket turns select side-chat routes from the stored thread metadata;
+a client-supplied `session_key` never overrides that decision. Side-chat turns
+exclude long-term memory capture, including after persistence.
+
 **Tool result blocks.** `tool_result` blocks in history (and `tool_result`
 frames on the chat WebSocket) carry the tool's return value in `output`. When a
 plugin returns a large `octop_ui` payload, the backend offloads the envelope's

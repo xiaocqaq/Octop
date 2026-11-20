@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
 import {
   PanelLeftOpen,
+  MessagesSquare,
   GraduationCap,
   Users,
   Globe,
@@ -19,9 +20,12 @@ import { showConfirmModal } from "../../utils/confirmModal";
 import PlanReadyCard from "./components/PlanReadyCard";
 import { useIsMobile } from "../../hooks/useIsMobile";
 import { useHitlEnabled } from "../../hooks/useHitlEnabled";
+import { useChatDocumentTitle } from "../../hooks/useDocumentTitle";
 import { useCurrentUser } from "../../hooks/useCurrentUser";
 import { navAllowed, userCan } from "../../utils/permissions";
 import { useChat } from "./hooks/useChat";
+import { useSideChat } from "./hooks/useSideChat";
+import SideChatPanel from "./components/SideChatPanel";
 import { useSessions, fetchAndSyncSessionArtifacts } from "./hooks/useSessions";
 import * as chatStore from "./hooks/chatStore";
 import { formatRunUsage, assistantTurnsFromEnd } from "./utils/chatMessages";
@@ -302,6 +306,7 @@ function ChatPageInner() {
     fetchAllSessions,
     ensureThreadInList,
   } = useSessions(resolvedAgentId ?? null);
+  const sideChat = useSideChat(resolvedAgentId ?? null, activeThreadId);
 
   const handleLoadMoreSessions = useCallback(() => {
     void loadMoreSessions(activeThreadId ?? undefined);
@@ -1366,10 +1371,20 @@ function ChatPageInner() {
     }
   }, [showWelcome, agentChatReady, noAgents]);
 
+  const currentSession = useMemo(
+    () => sessions.find((session) => session.id === activeThreadId),
+    [sessions, activeThreadId],
+  );
+  useChatDocumentTitle(
+    currentSession?.name,
+    t("app.pageTitle"),
+    activeThreadId,
+  );
+
   const activeSession = useMemo(() => {
     if (!activeThreadId || showWelcome) return null;
     return (
-      sessions.find((s) => s.id === activeThreadId) ?? {
+      currentSession ?? {
         id: activeThreadId,
         name: "New Chat",
         threadId: activeThreadId,
@@ -1380,7 +1395,7 @@ function ChatPageInner() {
         pinned: false,
       }
     );
-  }, [activeThreadId, sessions, showWelcome]);
+  }, [activeThreadId, currentSession, showWelcome]);
 
   const activeSessionTitle = useMemo(() => {
     if (!activeSession) return null;
@@ -1433,13 +1448,75 @@ function ChatPageInner() {
     />
   );
 
+  const handleCloseSideChat = async () => {
+    try {
+      await sideChat.close();
+    } catch (error) {
+      antMessage.error(
+        apiErrorMessage(error, t("chat.sideChat.closeFailed"), t),
+      );
+    }
+  };
+  const handlePersistSideChat = async () => {
+    try {
+      if (await sideChat.persist()) {
+        antMessage.success(t("chat.sideChat.saved"));
+        await fetchSessions(activeThreadId ?? undefined);
+      }
+    } catch (error) {
+      antMessage.error(
+        apiErrorMessage(error, t("chat.sideChat.saveFailed"), t),
+      );
+    }
+  };
+  const sideChatToggle =
+    !sharedExpertViewer && !isTeamChat && !activeAgent?.bridge ? (
+      <Tooltip title={t("chat.sideChat.open")}>
+        <Button
+          type="text"
+          aria-label={t("chat.sideChat.open")}
+          aria-expanded={Boolean(sideChat.thread)}
+          icon={<MessagesSquare size={17} />}
+          loading={sideChat.opening || sideChat.closing}
+          disabled={
+            sideChat.saving ||
+            (!sideChat.thread &&
+              (!agentChatReady ||
+                !activeThreadId ||
+                isStreaming ||
+                hasPendingHitlPause))
+          }
+          onClick={() => {
+            if (sideChat.thread) {
+              void handleCloseSideChat();
+            } else {
+              void sideChat
+                .open()
+                .then((opened) => {
+                  if (opened) handleDockClose();
+                })
+                .catch((error) => {
+                  antMessage.error(
+                    apiErrorMessage(error, t("chat.sideChat.openFailed"), t),
+                  );
+                });
+            }
+          }}
+        />
+      </Tooltip>
+    ) : null;
   const sidePanelToggle = !sharedExpertViewer ? (
-    <ChatSidePanelToggle
-      open={dockOpen}
-      disabled={!agentChatReady}
-      disabledHint={t("workspace.requiresRunning")}
-      onToggle={toggleSidePanel}
-    />
+    <>
+      {sideChatToggle}
+      <ChatSidePanelToggle
+        open={dockOpen}
+        disabled={
+          !agentChatReady || Boolean(sideChat.thread) || sideChat.opening
+        }
+        disabledHint={t("workspace.requiresRunning")}
+        onToggle={toggleSidePanel}
+      />
+    </>
   ) : null;
 
   return (
@@ -1510,6 +1587,7 @@ function ChatPageInner() {
                 )}
                 {resolvedAgentId && !sharedExpertViewer && (
                   <div className={styles.mobileToolbarRight}>
+                    {sideChatToggle}
                     <button
                       className={styles.menuBtn}
                       onClick={() => setAgentProfileOpen(true)}
@@ -2014,6 +2092,18 @@ function ChatPageInner() {
               decisionSaved={decisionSaved}
             />
           </div>
+
+          {sideChat.thread && resolvedAgentId && (
+            <SideChatPanel
+              agentId={resolvedAgentId}
+              thread={sideChat.thread}
+              onClose={() => void handleCloseSideChat()}
+              onPersist={handlePersistSideChat}
+              saving={sideChat.saving}
+              disabled={!agentChatReady || sideChat.closing}
+              availableModels={availableModels}
+            />
+          )}
 
           <ChatDockPanels
             isMobile={isMobile}

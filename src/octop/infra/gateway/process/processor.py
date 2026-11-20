@@ -32,8 +32,9 @@ from octop.infra.agents.teams.team_manager import (
 from octop.infra.agents.teams.team_manager import (
     stamp_team_host_chunk as _maybe_stamp_team_host,
 )
+from octop.infra.agents.threads.side_chat import require_live_thread, side_chat_key
 from octop.infra.agents.turn_resources import attach_turn_knowledge, resolve_turn_mcp
-from octop.infra.errors import OctopError
+from octop.infra.errors import ErrorCode, OctopError
 from octop.infra.gateway.cli.events import message_event_to_cli_chunks
 from octop.infra.gateway.hitl.coordinator import (
     HitlAnswerOutcome,
@@ -1198,6 +1199,18 @@ class GlobalProcessor:
             channel_type=channel_type,
             metadata=meta,
         )
+        try:
+            self._validate_side_chat_turn(
+                agent_id=agent_id,
+                user_id=user_id,
+                session_key=session_key,
+                thread_id=_inbound_thread_id(msg),
+            )
+        except OctopError as exc:
+            message, error_code = _stream_error(exc, locale)
+            yield {"type": "error", "message": message, "error_code": error_code}
+            yield {"type": "done"}
+            return
         cmd = parse_slash(msg.text)
         if cmd is not None and cmd.name in HITL_APPROVAL_COMMANDS:
             usage_tracker = UsageTracker()
@@ -1818,6 +1831,11 @@ class GlobalProcessor:
     ) -> dict[str, Any]:
         from octop.infra.agents.conversation_mode import execute_user_message
 
+        thread = self._thread_registry.get_thread(thread_id)
+        if thread is not None and thread.side_chat:
+            require_live_thread(thread)
+            request.setdefault("configurable", {})["octop_memory_capture_exclude"] = True
+
         if self._is_managed_agent(agent_id):
             return self._stamp_managed_session_mode(
                 request, agent_id=agent_id, thread_id=thread_id, meta=meta
@@ -1834,6 +1852,25 @@ class GlobalProcessor:
         elif mcp_servers:
             request["mcp_servers"] = mcp_servers
         return request
+
+    def _validate_side_chat_turn(
+        self, *, agent_id: str, user_id: int, session_key: str, thread_id: str | None
+    ) -> None:
+        bound = thread_id or self._thread_registry.get_bound_thread_id(session_key)
+        row = self._thread_registry.get_thread(bound) if bound else None
+        if bound in getattr(self._thread_registry, "snapshotting_threads", set()):
+            raise OctopError(ErrorCode.THREAD_TURN_ACTIVE, "thread snapshot in progress")
+        # A deleted/expired queued side turn must never recreate its binding.
+        if row is None and ":sidechat:" in session_key:
+            require_live_thread(row)
+        if row is not None and row.side_chat:
+            if row.agent_id != agent_id or row.user_id != user_id:
+                raise OctopError(ErrorCode.FORBIDDEN, "thread not owned by user")
+            require_live_thread(row)
+            if session_key != side_chat_key(
+                agent_id=agent_id, user_id=user_id, thread_id=row.thread_id
+            ):
+                raise OctopError(ErrorCode.FORBIDDEN, "invalid side chat route")
 
     def _is_managed_agent(self, agent_id: str) -> bool:
         getter = getattr(self._agent_manager, "get_row", None)

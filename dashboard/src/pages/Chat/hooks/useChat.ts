@@ -943,6 +943,7 @@ export function useChat(
   sessionId: string | null,
   agentId: string | null = null,
   isTeamRoom = false,
+  sideChat = false,
 ) {
   const stableSessionId = sessionId || "__empty__";
   const currentUser = useCurrentUser();
@@ -959,6 +960,7 @@ export function useChat(
 
   // Resume reconnect only for the thread the user is looking at.
   useEffect(() => {
+    if (sideChat) return chatStore.registerVisibleChatSession(stableSessionId);
     chatStore.setFocusedChatSession(stableSessionId);
     return () => {
       // Clear only if we still own focus (avoids racing a remount that already
@@ -967,7 +969,7 @@ export function useChat(
         chatStore.setFocusedChatSession(null);
       }
     };
-  }, [stableSessionId]);
+  }, [stableSessionId, sideChat]);
 
   // Subscribe to the external store for this session
   const subscribeStore = useCallback(

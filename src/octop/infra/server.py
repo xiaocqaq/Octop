@@ -329,6 +329,7 @@ class OctopServer:
         self._started_at: int | None = None
         self.instance_id = uuid.uuid4().hex
         self._serve_background = True
+        self._side_chat_task: asyncio.Task[None] | None = None
         self._sso_service: SsoService | None = None
         self._ldap_service: LdapAuthService | None = None
         self._ldap_bind_throttle: LdapBindThrottle | None = None
@@ -679,6 +680,10 @@ class OctopServer:
             trajectory_service=trajectory_service,
             bridge_manager=bridge_mgr,
         )
+        if self._serve_background:
+            from octop.infra.agents.threads.side_chat import side_chat_maintenance
+
+            self._side_chat_task = asyncio.create_task(side_chat_maintenance(self))
         from octop.infra.knowledge.gate import (  # noqa: PLC0415
             warn_if_local_embedding_deps_missing,
         )
@@ -794,6 +799,11 @@ class OctopServer:
             from octop.infra.connectors.gateway import agently_auth
 
             await agently_auth.close()
+            if self._side_chat_task is not None:
+                self._side_chat_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await self._side_chat_task
+                self._side_chat_task = None
             if self.app_runtime is not None:
                 rt = self.app_runtime
                 await rt.proactive_scheduler.shutdown()

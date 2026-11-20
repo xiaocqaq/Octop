@@ -179,7 +179,7 @@ describe("history failures", () => {
           id: "old",
           role: "assistant",
           content: "之前的回复",
-          timestamp: "2020-01-01T00:00:00Z",
+          timestamp: Date.parse("2020-01-01T00:00:00Z"),
         },
       ],
       has_more: false,

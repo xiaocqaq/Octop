@@ -1,6 +1,6 @@
 {
   "app": {
-    "pageTitle": "mxiao"
+    "pageTitle": "Mxiao"
   },
   "layout": {
     "collapsePanel": "Collapse panel",
@@ -1581,6 +1581,23 @@
     "refreshingMessages": "Refreshing messages…",
     "streamResumed": "Connection restored. Pull down to refresh if anything looks incomplete.",
     "regenerate": "Regenerate",
+    "sideChat": {
+      "title": "Side chat",
+      "open": "Open side chat",
+      "temporaryHint": "Inherits the current context. New messages stay separate; close to discard or save as an independent chat.",
+      "save": "Save as chat",
+      "saving": "Saving",
+      "close": "Close side chat",
+      "loadFailed": "Failed to load side chat history",
+      "retry": "Retry",
+      "askAttachments": "Use the question card to answer; attachments are unavailable",
+      "finishPendingFirst": "Finish the pending approval first",
+      "dismissMessage": "The user dismissed this question",
+      "openFailed": "Failed to open side chat",
+      "closeFailed": "Failed to close side chat",
+      "saveFailed": "Failed to save side chat",
+      "saved": "Saved as an independent conversation"
+    },
     "fork": "Fork",
     "forkFromHere": "Fork from here",
     "forkSuccess": "Forked into a new chat",

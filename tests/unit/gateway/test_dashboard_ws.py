@@ -612,6 +612,9 @@ async def test_global_processor_iter_turn_chunks_registers_hitl() -> None:
 
     thread_registry = MagicMock()
     thread_registry.get_or_create_by_key = AsyncMock(return_value="thread-hitl")
+    thread_registry.get_thread.return_value.configure_mock(
+        side_chat=False, expires_at=None, gc_claimed_at=None
+    )
 
     hitl = HitlChannelCoordinator()
     processor = GlobalProcessor(
@@ -675,6 +678,9 @@ async def test_iter_turn_chunks_answers_ask_on_same_dashboard_thread() -> None:
 
     thread_registry = MagicMock()
     thread_registry.get_or_create_by_key = AsyncMock(return_value="thr_quiz")
+    thread_registry.get_thread.return_value.configure_mock(
+        side_chat=False, expires_at=None, gc_claimed_at=None
+    )
 
     hitl = HitlChannelCoordinator()
     ask = hitl.store.register(
@@ -756,6 +762,9 @@ async def test_iter_turn_chunks_does_not_answer_ask_on_other_dashboard_thread() 
 
     thread_registry = MagicMock()
     thread_registry.get_or_create_by_key = AsyncMock(return_value="thr_new")
+    thread_registry.get_thread.return_value.configure_mock(
+        side_chat=False, expires_at=None, gc_claimed_at=None
+    )
 
     hitl = HitlChannelCoordinator()
     ask = hitl.store.register(
@@ -833,6 +842,9 @@ async def test_global_processor_iter_turn_chunks_expires_stale_hitl() -> None:
 
     thread_registry = MagicMock()
     thread_registry.get_or_create_by_key = AsyncMock(return_value="thread-hitl")
+    thread_registry.get_thread.return_value.configure_mock(
+        side_chat=False, expires_at=None, gc_claimed_at=None
+    )
 
     hitl = HitlChannelCoordinator()
     stale = hitl.store.register(
@@ -901,7 +913,8 @@ async def test_global_processor_iter_turn_chunks_slash(tmp_path: Path) -> None:
     user_id = UserRepo(db).create(username="u", password_hash="hash", role="user")
     agent_repo = AgentRepo(db)
     agent_repo.create(agent_id="agent-1", user_id=user_id, name="Agent")
-    ThreadRepo(db).insert(
+    thread_repo = ThreadRepo(db)
+    thread_repo.insert(
         thread_id="thread-1",
         agent_id="agent-1",
         user_id=user_id,
@@ -911,6 +924,7 @@ async def test_global_processor_iter_turn_chunks_slash(tmp_path: Path) -> None:
     history_repo = ThreadMessageRepo(db)
     thread_registry = MagicMock()
     thread_registry.get_or_create_by_key = AsyncMock(return_value="thread-1")
+    thread_registry.get_thread.side_effect = thread_repo.get
     human = HumanMessage(content="/help", id="slash:x:human")
     ai = AIMessage(content="help-text", id="slash:x:assistant")
     harness = MagicMock()

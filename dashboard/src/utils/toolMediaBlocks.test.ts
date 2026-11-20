@@ -3,6 +3,7 @@ import {
   agentAttachmentAccessUrl,
   agentMediaPreviewUrl,
   canonicalizeMediaApiUrl,
+  collectToolMediaFromToolData,
   isHostAbsoluteMediaPath,
   needsAuthBlobFetch,
   parseStructuredToolOutput,
@@ -183,6 +184,291 @@ describe("parseStructuredToolOutput", () => {
       action: "retry_with_loaded_schema",
       retryable: true,
     });
+  });
+});
+
+describe("collectToolMediaFromToolData", () => {
+  it.each([
+    agentMediaPreviewUrl("main", "generated/chart.png"),
+    workspaceDownloadUrl("main", "generated/chart.png"),
+  ])("deduplicates generated image alias %s", (alias) => {
+    const first = agentMediaPreviewUrl(
+      "main",
+      "generated/chart.png",
+      "image/png",
+    );
+    const media = collectToolMediaFromToolData(
+      {
+        output: JSON.stringify({
+          type: "image_gen_tool_result",
+          images: [{ path: "generated/chart.png", mediaType: "image/png" }],
+        }),
+      },
+      "main",
+      [{ kind: "image", url: alias }],
+    );
+
+    expect(media.images.map((item) => item.url)).toEqual([first]);
+  });
+
+  it("merges preview aliases with and without a MIME query", () => {
+    const media = collectToolMediaFromToolData(
+      {
+        output: JSON.stringify([
+          {
+            type: "image",
+            source: {
+              type: "url",
+              url: agentMediaPreviewUrl(
+                "main",
+                "generated/chart.png",
+                "image/png",
+              ),
+            },
+          },
+          {
+            type: "image",
+            source: {
+              type: "url",
+              url: agentMediaPreviewUrl("main", "generated/chart.png"),
+            },
+          },
+        ]),
+      },
+      "main",
+    );
+    expect(media.images).toHaveLength(1);
+  });
+
+  it.each(["image", "video"] as const)(
+    "retains a later %s MIME hint on the first no-extension preview",
+    (kind) => {
+      const noHint = agentMediaPreviewUrl("main", "generated/art");
+      const hinted = agentMediaPreviewUrl(
+        "main",
+        "generated/art",
+        kind === "image" ? "image/png" : "video/mp4",
+      );
+      const media = collectToolMediaFromToolData(
+        {
+          output: JSON.stringify(
+            [noHint, hinted].map((url) => ({
+              type: kind,
+              source: { type: "url", url },
+            })),
+          ),
+        },
+        "main",
+      );
+
+      const items = kind === "image" ? media.images : media.videos;
+      expect(items.map(({ url }) => url)).toEqual([hinted]);
+    },
+  );
+
+  it("normalizes a later uppercase MIME hint with surrounding whitespace", () => {
+    const noHint = agentMediaPreviewUrl("main", "generated/art");
+    const media = collectToolMediaFromToolData(
+      {
+        output: JSON.stringify({
+          type: "image",
+          source: { type: "url", url: noHint },
+        }),
+      },
+      "main",
+      [{ kind: "image", url: noHint, mediaType: " IMAGE/PNG " }],
+    );
+    expect(media.images.map(({ url }) => url)).toEqual([
+      agentMediaPreviewUrl("main", "generated/art", "image/png"),
+    ]);
+    expect(media.images[0].mimeType).toBe("image/png");
+  });
+
+  it("merges later attachment MIME without changing order or other URLs", () => {
+    const other = agentMediaPreviewUrl("main", "generated/other");
+    const first = agentMediaPreviewUrl(
+      "main",
+      "generated/art",
+      "application/octet-stream",
+    );
+    const otherAgent = agentMediaPreviewUrl("peer", "generated/art");
+    const media = collectToolMediaFromToolData(
+      {
+        output: JSON.stringify(
+          [other, first, otherAgent].map((url) => ({
+            type: "image",
+            source: { type: "url", url },
+          })),
+        ),
+      },
+      "main",
+      [
+        {
+          kind: "image",
+          url: agentMediaPreviewUrl("main", "generated/art"),
+          mediaType: "image/png",
+        },
+      ],
+    );
+    expect(media.images.map(({ url }) => url)).toEqual([
+      other,
+      agentMediaPreviewUrl("main", "generated/art", "image/png"),
+      otherAgent,
+    ]);
+    expect(media.images[1].mimeType).toBe("image/png");
+  });
+
+  it("keeps an image from tool arguments in a distinct directory", () => {
+    const media = collectToolMediaFromToolData(
+      {
+        output: JSON.stringify({
+          type: "image_gen_tool_result",
+          images: [{ path: "generated/a/chart.png", mediaType: "image/png" }],
+        }),
+        arguments: JSON.stringify({ path: "generated/b/chart.png" }),
+      },
+      "main",
+    );
+    expect(media.images.map((item) => item.url)).toEqual([
+      agentMediaPreviewUrl("main", "generated/a/chart.png", "image/png"),
+      agentMediaPreviewUrl("main", "generated/b/chart.png", "image/png"),
+    ]);
+  });
+
+  it("keeps local images from different agents or directories distinct", () => {
+    const media = collectToolMediaFromToolData(
+      {
+        output: JSON.stringify([
+          {
+            type: "image",
+            source: {
+              type: "url",
+              url: agentMediaPreviewUrl("agent-a", "outbound/chart.png"),
+            },
+          },
+          {
+            type: "image",
+            source: {
+              type: "url",
+              url: agentMediaPreviewUrl("agent-b", "outbound/chart.png"),
+            },
+          },
+          {
+            type: "image",
+            source: {
+              type: "url",
+              url: agentMediaPreviewUrl("agent-a", "other/chart.png"),
+            },
+          },
+        ]),
+      },
+      "agent-a",
+    );
+    expect(media.images).toHaveLength(3);
+  });
+
+  it("keeps attachment download links owned by distinct agents", () => {
+    const urls = ["agent-a", "agent-b"].map((id) =>
+      workspaceDownloadUrl(id, "outbound/chart.png"),
+    );
+    const media = collectToolMediaFromToolData(
+      undefined,
+      "agent-a",
+      urls.map((url) => ({ kind: "image", url })),
+    );
+    expect(media.images.map((item) => item.url)).toEqual(urls);
+  });
+
+  it("keeps the agent embedded in a legacy absolute preview source", () => {
+    const media = collectToolMediaFromToolData(undefined, "chat-agent", [
+      {
+        kind: "image",
+        url: agentMediaPreviewUrl(
+          "chat-agent",
+          "/tmp/.octop/agents/ABC123/generated/chart.png",
+        ),
+      },
+    ]);
+    expect(media.images.map((item) => item.url)).toEqual([
+      agentMediaPreviewUrl(
+        "ABC123",
+        "/tmp/.octop/agents/ABC123/generated/chart.png",
+      ),
+    ]);
+  });
+
+  it("deduplicates a video preview and download for the same file", () => {
+    const preview = agentMediaPreviewUrl(
+      "main",
+      "generated/clip.mp4",
+      "video/mp4",
+    );
+    const download = workspaceDownloadUrl("main", "generated/clip.mp4");
+    const media = collectToolMediaFromToolData(
+      {
+        output: JSON.stringify(
+          [preview, download].map((url) => ({
+            type: "video",
+            source: { type: "url", url },
+          })),
+        ),
+      },
+      "main",
+    );
+    expect(media.videos.map((item) => item.url)).toEqual([preview]);
+  });
+
+  it("does not merge matching paths on different external hosts", () => {
+    const media = collectToolMediaFromToolData(
+      {
+        output: JSON.stringify([
+          {
+            type: "image",
+            source: {
+              type: "url",
+              url: "https://one.example/api/agents/a/media/preview?source=outbound%2Fchart.png",
+            },
+          },
+          {
+            type: "image",
+            source: {
+              type: "url",
+              url: "https://two.example/api/agents/a/media/preview?source=outbound%2Fchart.png",
+            },
+          },
+        ]),
+      },
+      "a",
+    );
+    expect(media.images).toHaveLength(2);
+  });
+
+  it("deduplicates image URLs after canonicalization", () => {
+    const media = collectToolMediaFromToolData(
+      {
+        output: JSON.stringify([
+          {
+            type: "image",
+            source: {
+              type: "url",
+              url: "/api/agents/main/media/preview?source=%2Foutbound%2Fchart.png",
+            },
+          },
+          {
+            type: "image",
+            source: {
+              type: "url",
+              url: workspaceDownloadUrl("main", "outbound/chart.png"),
+            },
+          },
+        ]),
+      },
+      "main",
+    );
+    expect(media.images).toHaveLength(1);
+    expect(media.images[0].url).toBe(
+      workspaceDownloadUrl("main", "outbound/chart.png"),
+    );
   });
 });
 

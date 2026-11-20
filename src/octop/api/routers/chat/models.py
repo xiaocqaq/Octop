@@ -13,6 +13,37 @@ _MAX_DECISIONS = 16
 _MAX_DECISION_MESSAGE_CHARS = 8000
 
 
+class SideChatThreadResponse(BaseModel):
+    """Thread metadata; side-chat identity survives clearing its expiry."""
+
+    thread_id: str
+    title: str | None
+    channel_type: str
+    session_key: str
+    last_active: int
+    created_at: int
+    is_active: bool = False
+    has_messages: bool
+    pinned: bool
+    unread_count: int = 0
+    contributed: bool = False
+    owned: bool = True
+    model_ref: str | None
+    reasoning_mode: str | None
+    reasoning_effort: str | None
+    conversation_mode: str
+    session_mode: str | None = None
+    pending_plan_path: str | None = None
+    hitl_policy: dict[str, Any] | None = None
+    turn_active: bool = False
+    awaiting_user: bool = False
+    artifacts: list[dict[str, Any]] = Field(default_factory=list)
+    side_chat: bool = True
+    source_thread_id: str = Field(description="Thread whose effective context was copied.")
+    copied_messages: int = Field(description="Number of copied effective-context messages.")
+    expires_at: int | None = Field(description="Unix seconds; null after explicit persistence.")
+
+
 class HitlSessionPolicyBody(BaseModel):
     """Dashboard chat bypass for tool approval (does not change global HITL)."""
 
@@ -33,7 +64,7 @@ class ChatTurnBody(BaseModel):
     )
     session_key: str | None = Field(
         default=None,
-        description="Dashboard session key. Defaults to the per-user dashboard key for this agent.",
+        description="Compatibility field; dashboard routing is selected by the server from thread identity.",
     )
     mcp_servers: list[str] | None = Field(
         default=None,

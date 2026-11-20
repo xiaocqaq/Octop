@@ -99,6 +99,34 @@ function continueTokenOpts(state: SessionStreamState): {
 // ── Focused chat session (reconnect thrash only for the visible tab) ──────
 
 let focusedChatSessionId: string | null = null;
+const additionalVisibleSessions = new Map<string, number>();
+
+/** Keep a side pane reconnectable without taking focus from the main chat. */
+export function registerVisibleChatSession(sessionId: string): () => void {
+  if (sessionId === "__empty__") return () => undefined;
+  additionalVisibleSessions.set(
+    sessionId,
+    (additionalVisibleSessions.get(sessionId) ?? 0) + 1,
+  );
+  void rebindFocusedSessionIfNeeded(sessionId);
+  let registered = true;
+  return () => {
+    if (!registered) return;
+    registered = false;
+    const count = (additionalVisibleSessions.get(sessionId) ?? 1) - 1;
+    if (count > 0) {
+      additionalVisibleSessions.set(sessionId, count);
+      return;
+    }
+    additionalVisibleSessions.delete(sessionId);
+    if (
+      focusedChatSessionId !== sessionId &&
+      !sessionStates.get(sessionId)?.isStreaming
+    ) {
+      closeLiveSocket(sessionId, { intentional: true });
+    }
+  };
+}
 
 /** Tell the store which chat thread the UI is currently showing. */
 export function setFocusedChatSession(sessionId: string | null): void {
@@ -117,7 +145,7 @@ export function setFocusedChatSession(sessionId: string | null): void {
     }
     // Listen sockets stay open after a turn so late team replies can land.
     // Leaving the room drops that idle bind; an in-flight turn keeps resume.
-    if (!prevState?.isStreaming) {
+    if (!prevState?.isStreaming && !additionalVisibleSessions.has(prev)) {
       closeLiveSocket(prev, { intentional: true });
     }
   }
@@ -132,8 +160,12 @@ export function getFocusedChatSession(): string | null {
 
 function isSessionFocused(sessionId: string): boolean {
   // Unset focus (unit tests / before first paint) → treat as focused.
-  if (focusedChatSessionId == null) return true;
-  return focusedChatSessionId === sessionId;
+  if (focusedChatSessionId == null && additionalVisibleSessions.size === 0)
+    return true;
+  return (
+    focusedChatSessionId === sessionId ||
+    additionalVisibleSessions.has(sessionId)
+  );
 }
 
 async function rebindFocusedSessionIfNeeded(sessionId: string): Promise<void> {

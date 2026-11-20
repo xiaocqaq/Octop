@@ -1,6 +1,6 @@
 {
   "app": {
-    "pageTitle": "mxiao"
+    "pageTitle": "Mxiao"
   },
   "layout": {
     "collapsePanel": "收起面板",
@@ -1581,6 +1581,23 @@
     "refreshingMessages": "正在刷新消息…",
     "streamResumed": "连接已恢复。若内容不完整，可下拉刷新。",
     "regenerate": "重新生成",
+    "sideChat": {
+      "title": "侧聊",
+      "open": "开启侧聊",
+      "temporaryHint": "继承当前上下文，新消息与主聊隔离；关闭即丢弃，也可保存为独立对话。",
+      "save": "保存为独立对话",
+      "saving": "保存中",
+      "close": "关闭侧聊",
+      "loadFailed": "侧聊历史加载失败",
+      "retry": "重试",
+      "askAttachments": "请使用提问卡回答，不能附加文件",
+      "finishPendingFirst": "请先完成待处理确认",
+      "dismissMessage": "用户跳过了这个问题",
+      "openFailed": "开启侧聊失败",
+      "closeFailed": "关闭侧聊失败",
+      "saveFailed": "保存侧聊失败",
+      "saved": "已保存为独立对话"
+    },
     "fork": "分叉",
     "forkFromHere": "从此处分叉",
     "forkSuccess": "已创建分叉对话",

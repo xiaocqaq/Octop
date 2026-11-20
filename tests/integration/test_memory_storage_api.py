@@ -195,6 +195,16 @@ async def test_backup_deletion_excludes_maintenance_and_restore(
         assert release.wait(10)
 
     monkeypatch.setattr(sqlite_restore, "delete_backup", slow_delete)
+    # Initialize the DELETE route before timing the worker handoff.
+    assert (
+        await client.request(
+            "DELETE",
+            base + "/backups",
+            headers=auth,
+            json={"confirmed": False, "backup_id": "placeholder"},
+        )
+    ).status_code == 422
+
     deleting = asyncio.create_task(
         client.request(
             "DELETE",

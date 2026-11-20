@@ -237,6 +237,13 @@ class HitlSessionPolicyStore:
         self.set(tid, policy)
         return True
 
+    def forget(self, thread_id: str) -> None:
+        """Discard cached policy for a deleted conversation and its member threads."""
+        for key in set(self._cache) | set(self._rev):
+            if key == thread_id or key.startswith(f"{thread_id}~"):
+                self._cache.pop(key, None)
+                self._rev.pop(key, None)
+
     def reset_bypass(self, thread_id: str) -> None:
         """Restore ask-every-time for one conversation and its loaded member threads."""
         tid = (thread_id or "").strip()

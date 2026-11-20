@@ -146,7 +146,7 @@ describe("mxiao branding", () => {
     expect(legacy).toEqual([]);
   });
   it.each(["en", "zh"])(
-    "uses mxiao in %s product copy while preserving technical names",
+    "uses the Mxiao site title in %s while preserving technical names",
     (locale) => {
       const frontend = JSON.parse(read(`src/locales/${locale}.json`));
       const backend = JSON.parse(read(`../src/octop/i18n/${locale}.json`));
@@ -157,7 +157,7 @@ describe("mxiao branding", () => {
           ),
         ).toEqual([]);
       }
-      expect(frontend.app.pageTitle).toBe("mxiao");
+      expect(frontend.app.pageTitle).toBe("Mxiao");
       expect(frontend.common.askOctopHint).toContain("mxiao");
       expect(frontend.skills["octop-assistant"]).toBe(
         backend.skills["octop-assistant"],
@@ -180,27 +180,28 @@ describe("mxiao branding", () => {
       }
     },
   );
-  it("identifies the browser shell, installed app and offline page as mxiao", () => {
+  it("identifies the browser shell, installed app and offline page as Mxiao", () => {
     const html = new DOMParser().parseFromString(
       read("index.html"),
       "text/html",
     );
-    expect(html.title).toBe("mxiao");
+    expect(html.title).toBe("Mxiao");
     expect(
       html
         .querySelector('[name="apple-mobile-web-app-title"]')
         ?.getAttribute("content"),
-    ).toBe("mxiao");
+    ).toBe("Mxiao");
     for (const logo of html.querySelectorAll("#octop-boot img")) {
-      expect(logo.getAttribute("alt")).toBe("mxiao");
+      expect(logo.getAttribute("alt")).toBe("Mxiao");
     }
     const manifest = JSON.parse(read("public/manifest.json"));
-    expect(manifest.name).toBe("mxiao");
-    expect(manifest.short_name).toBe("mxiao");
+    expect(manifest.name).toBe("Mxiao");
+    expect(manifest.short_name).toBe("Mxiao");
     expect(manifest.id).toBe("/");
     expect(manifest.start_url).toBe("/");
     const offline = read("public/offline.html");
-    expect(offline).toContain("mxiao");
+    const offlinePage = new DOMParser().parseFromString(offline, "text/html");
+    expect(offlinePage.title).toBe("Mxiao — 离线中");
     expect(offline).not.toMatch(/Octop|CoPaw|Copaw/i);
   });
 });

@@ -5,7 +5,7 @@ from __future__ import annotations
 import contextlib
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse, Response
@@ -13,7 +13,12 @@ from fastapi.responses import JSONResponse, Response
 from octop.api.common.agent import agent_is_shared, require_agent_row
 from octop.api.common.agent_workspace import resolve_agent_workspace_dir
 from octop.api.deps import current_user, get_server
-from octop.api.routers.chat.models import ForkThreadBody, RebindSessionBody, RenameThreadBody
+from octop.api.routers.chat.models import (
+    ForkThreadBody,
+    RebindSessionBody,
+    RenameThreadBody,
+    SideChatThreadResponse,
+)
 from octop.api.routers.chat.serialize import (
     HISTORY_DEFAULT_LIMIT,
     _backfill_thread_projection,
@@ -25,6 +30,15 @@ from octop.infra.agents.security.hitl_session import parse_hitl_session_policy
 from octop.infra.agents.threads.artifact import thread_artifacts_payload
 from octop.infra.agents.threads.context_breakdown import SEGMENT_KEYS, compute_context_breakdown
 from octop.infra.agents.threads.fork import fork_dashboard_thread
+from octop.infra.agents.threads.side_chat import (
+    clear_side_chat_pauses,
+    create_side_chat,
+    discard_temporary_side_chat,
+    persist_side_chat,
+    require_live_thread,
+    side_chat_key,
+    sweep_expired_side_chats,
+)
 from octop.infra.agents.workspace.dir import agent_facing_workspace_dir_from_config
 from octop.infra.errors import ErrorCode, OctopError
 from octop.infra.gateway.hitl.coordinator import pending_hitl_payload
@@ -201,6 +215,7 @@ def _require_thread(
     as_user: int | None,
     *,
     write: bool = False,
+    allow_expired: bool = False,
 ) -> Any:
     """Load a thread the caller may open.
 
@@ -217,7 +232,87 @@ def _require_thread(
             raise OctopError(ErrorCode.FORBIDDEN, "thread not owned by user")
     elif not thread_visible_to(row, effective_uid):
         raise OctopError(ErrorCode.FORBIDDEN, "thread not owned by user")
+    if not allow_expired:
+        require_live_thread(row)
     return row
+
+
+def _side_chat_response(server: Any, agent_id: str, row: Any) -> SideChatThreadResponse:
+    gateway = server.app_runtime.gateway
+    awaiting = gateway.processor.hitl_coordinator.store.pending_thread_ids(
+        agent_id=agent_id, user_id=row.user_id, any_user=True
+    )
+    return SideChatThreadResponse(
+        thread_id=row.thread_id,
+        title=row.title,
+        channel_type=row.channel_type,
+        session_key=row.session_key,
+        last_active=row.last_active,
+        created_at=row.created_at,
+        has_messages=row.copied_messages > 0 or row.last_active > 0,
+        pinned=row.pinned,
+        model_ref=row.model_ref,
+        reasoning_mode=row.reasoning_mode,
+        reasoning_effort=row.reasoning_effort,
+        conversation_mode=row.conversation_mode or "craft",
+        session_mode=_session_mode_payload(server, agent_id, row),
+        hitl_policy=_hitl_policy_payload(row, default_yolo=_managed_yolo_default(server, agent_id)),
+        turn_active=gateway.ws_hub.is_turn_active(row.thread_id),
+        awaiting_user=row.thread_id in awaiting,
+        source_thread_id=row.source_thread_id,
+        copied_messages=row.copied_messages,
+        expires_at=row.expires_at,
+        **thread_artifacts_payload(
+            row.artifacts, _agent_facing_workspace_dir(server, agent_id), default_agent_id=agent_id
+        ),
+    )
+
+
+@router.post(
+    "/agents/{agent_id}/threads/{thread_id}/side-chat",
+    response_model=SideChatThreadResponse,
+    summary="Create isolated side chat",
+    description="Copy effective conversation context into a private 24-hour thread without changing the main dashboard session. The source must be owned and idle.",
+)
+async def post_side_chat(
+    agent_id: str,
+    thread_id: str,
+    as_user: int | None = None,
+    user: Any = Depends(current_user),
+    server: Any = Depends(get_server),
+) -> SideChatThreadResponse:
+    require_agent_row(agent_id, user=user, as_user=as_user, server=server)
+    await sweep_expired_side_chats(server)
+    row = await create_side_chat(
+        server,
+        agent_id=agent_id,
+        source_thread_id=thread_id,
+        user_id=as_user if as_user is not None else user.id,
+    )
+    return _side_chat_response(server, agent_id, row)
+
+
+@router.post(
+    "/agents/{agent_id}/threads/{thread_id}/persist",
+    response_model=SideChatThreadResponse,
+    summary="Persist side chat",
+    description="Idempotently clear the side chat expiry and reveal it in the thread list. Does not change the main dashboard session. Expired threads cannot be saved.",
+)
+async def post_persist_side_chat(
+    agent_id: str,
+    thread_id: str,
+    as_user: int | None = None,
+    user: Any = Depends(current_user),
+    server: Any = Depends(get_server),
+) -> SideChatThreadResponse:
+    require_agent_row(agent_id, user=user, as_user=as_user, server=server)
+    row = persist_side_chat(
+        server,
+        agent_id=agent_id,
+        thread_id=thread_id,
+        user_id=as_user if as_user is not None else user.id,
+    )
+    return _side_chat_response(server, agent_id, row)
 
 
 @router.get("/agents/{agent_id}/threads", summary="List threads")
@@ -234,6 +329,7 @@ async def list_threads(
     is true when the thread is paused on a HITL approval or question.
     """
     require_agent_row(agent_id, user=user, as_user=as_user, server=server)
+    await sweep_expired_side_chats(server)
     thread_registry = server.app_runtime.gateway.thread_registry
     effective_uid = as_user if as_user is not None else user.id
     rows = thread_registry.list_visible_threads(
@@ -274,6 +370,10 @@ async def list_threads(
             "last_active": r.last_active,
             "created_at": r.created_at,
             "is_active": r.thread_id == bound,
+            "side_chat": r.side_chat,
+            "source_thread_id": r.source_thread_id,
+            "copied_messages": r.copied_messages,
+            "expires_at": r.expires_at,
             "has_messages": _has_messages(r),
             "pinned": r.pinned,
             "unread_count": int(unread.get(r.thread_id, 0)),
@@ -640,8 +740,12 @@ async def rebind_session(
     server: Any = Depends(get_server),
 ) -> dict[str, Any]:
     """Point the user's dashboard session at an existing thread."""
-    _require_thread(server, agent_id, body.thread_id, user, as_user=None)
-    sk = ThreadRegistry.dashboard_key(agent_id=agent_id, user_id=user.id)
+    row = _require_thread(server, agent_id, body.thread_id, user, as_user=None)
+    sk = (
+        side_chat_key(agent_id=agent_id, user_id=user.id, thread_id=row.thread_id)
+        if row.side_chat
+        else ThreadRegistry.dashboard_key(agent_id=agent_id, user_id=user.id)
+    )
     await server.app_runtime.gateway.thread_registry.rebind(
         session_key=sk,
         thread_id=body.thread_id,
@@ -782,10 +886,17 @@ async def delete_thread(
     thread_id: str,
     as_user: int | None = None,
     compact: bool | None = Query(default=None),
+    temporary_only: Annotated[
+        bool, Query(description="Discard only an unpersisted temporary side chat.")
+    ] = False,
     user: Any = Depends(current_user),
     server: Any = Depends(get_server),
 ) -> Response:
     """Remove a conversation thread, its checkpoint data, and its metadata.
+
+    With ``temporary_only=true``, discard only an unpersisted side chat. The row is
+    claimed before checkpoint deletion so a concurrent persist wins safely; saved
+    threads and ordinary threads return ``204`` without deletion.
 
     Checkpoint deletion runs first. ``CHECKPOINT_DELETE_FAILED`` leaves
     the thread row in place so the caller can retry, instead of dropping
@@ -797,17 +908,25 @@ async def delete_thread(
     maintenance reclaims the free space later, once the freelist is large
     enough. Omitting ``compact`` keeps the previous empty 204.
     """
-    _require_thread(server, agent_id, thread_id, user, as_user, write=True)
-    if server.app_runtime.gateway.ws_hub.is_turn_active(thread_id):
-        raise OctopError(
-            ErrorCode.THREAD_TURN_ACTIVE,
-            error_message(ErrorCode.THREAD_TURN_ACTIVE.value, "en"),
-        )
+    row = _require_thread(
+        server, agent_id, thread_id, user, as_user, write=True, allow_expired=True
+    )
     registry = server.app_runtime.agent_registry
-    if compact is False:
-        await registry.delete_thread_checkpoint(agent_id, thread_id, reclaim=False)
+    if temporary_only:
+        if not await discard_temporary_side_chat(server, row, reclaim=compact is not False):
+            return Response(status_code=204)
     else:
-        await registry.delete_thread_checkpoint(agent_id, thread_id)
+        if server.app_runtime.gateway.ws_hub.is_turn_active(thread_id):
+            raise OctopError(
+                ErrorCode.THREAD_TURN_ACTIVE,
+                error_message(ErrorCode.THREAD_TURN_ACTIVE.value, "en"),
+            )
+        if compact is False:
+            await registry.delete_thread_checkpoint(agent_id, thread_id, reclaim=False)
+        else:
+            await registry.delete_thread_checkpoint(agent_id, thread_id)
+    if row.side_chat:
+        clear_side_chat_pauses(server, row)
     server.app_runtime.gateway.thread_registry.delete_thread(thread_id)
     runtime = getattr(server, "app_runtime", None)
     trajectory = getattr(runtime, "trajectory_service", None) if runtime is not None else None

@@ -243,7 +243,14 @@ async def test_list_threads_derives_has_messages_from_db() -> None:
 @pytest.mark.asyncio
 async def test_get_thread_history_returns_has_more(monkeypatch: pytest.MonkeyPatch) -> None:
     server = MagicMock()
-    row = MagicMock(agent_id="agt_1", user_id=1, artifacts=())
+    row = MagicMock(
+        agent_id="agt_1",
+        user_id=1,
+        artifacts=(),
+        side_chat=False,
+        expires_at=None,
+        gc_claimed_at=None,
+    )
     server.app_runtime.gateway.thread_registry.get_thread.return_value = row
 
     server.services.thread_message_repo.projection_status.return_value = "ready"
@@ -273,7 +280,14 @@ async def test_get_legacy_history_enqueues_without_reading_checkpoint(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     server = MagicMock()
-    row = MagicMock(agent_id="agt_1", user_id=1, artifacts=())
+    row = MagicMock(
+        agent_id="agt_1",
+        user_id=1,
+        artifacts=(),
+        side_chat=False,
+        expires_at=None,
+        gc_claimed_at=None,
+    )
     server.app_runtime.gateway.thread_registry.get_thread.return_value = row
     server.services.thread_message_repo.projection_status.return_value = "pending"
     server.app_runtime.gateway.history_backfill.enqueue.return_value = True
@@ -371,7 +385,14 @@ async def test_history_migration_waits_while_agent_is_active() -> None:
     server.services.thread_message_repo.migration_active_thread_ids.return_value = []
     server.app_runtime.gateway.history_backfill.available_slots = 10
     server.app_runtime.gateway.history_backfill.contains.return_value = False
-    row = MagicMock(agent_id="agt_1", user_id=7, artifacts=())
+    row = MagicMock(
+        agent_id="agt_1",
+        user_id=7,
+        artifacts=(),
+        side_chat=False,
+        expires_at=None,
+        gc_claimed_at=None,
+    )
     server.app_runtime.gateway.thread_registry.get_thread.return_value = row
     server.services.thread_message_repo.projection_status.return_value = "pending"
     user = MagicMock(id=7, is_admin=False)

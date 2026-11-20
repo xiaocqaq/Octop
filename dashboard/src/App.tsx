@@ -4,7 +4,7 @@ import zhCN from "antd/locale/zh_CN";
 import enUS from "antd/locale/en_US";
 import dayjs from "dayjs";
 import "dayjs/locale/zh-cn";
-import { useEffect } from "react";
+import { useSiteDocumentTitle } from "./hooks/useDocumentTitle";
 import {
   DesktopChromeProvider,
   useDesktopChrome,
@@ -62,10 +62,7 @@ function ThemedApp() {
 
   useUnauthorizedRedirect();
 
-  // Set document title based on current language
-  useEffect(() => {
-    document.title = t("app.pageTitle");
-  }, [t]);
+  useSiteDocumentTitle(t("app.pageTitle"));
 
   const themeConfig = {
     algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,

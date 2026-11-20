@@ -62,9 +62,14 @@ def _processor(
     agent_repo = MagicMock()
     agent_repo.get = MagicMock(return_value=agent_row)
 
+    thread_registry = MagicMock()
+    thread_registry.get_thread.return_value.configure_mock(
+        side_chat=False, expires_at=None, gc_claimed_at=None
+    )
+
     return GlobalProcessor(
         agent_manager=agent_manager,
-        thread_registry=MagicMock(),
+        thread_registry=thread_registry,
         audit_repo=MagicMock(),
         agent_repo=agent_repo,
         user_repo=MagicMock(),

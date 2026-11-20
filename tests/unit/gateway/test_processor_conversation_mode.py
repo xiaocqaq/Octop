@@ -62,6 +62,9 @@ async def test_dashboard_execute_overwrites_user_text() -> None:
             conversation_mode="plan",
             pending_plan_path="plans/foo.md",
             model_ref=None,
+            side_chat=False,
+            expires_at=None,
+            gc_claimed_at=None,
         )
     )
     msg = InboundMessage(
@@ -96,6 +99,9 @@ async def test_dashboard_mode_switch_keeps_pending_plan() -> None:
             conversation_mode="plan",
             pending_plan_path="plans/foo.md",
             model_ref=None,
+            side_chat=False,
+            expires_at=None,
+            gc_claimed_at=None,
         )
     )
     msg = InboundMessage(
@@ -129,6 +135,9 @@ async def test_dashboard_turn_applies_hitl_policy() -> None:
             conversation_mode="craft",
             pending_plan_path=None,
             model_ref=None,
+            side_chat=False,
+            expires_at=None,
+            gc_claimed_at=None,
         )
     )
     msg = InboundMessage(

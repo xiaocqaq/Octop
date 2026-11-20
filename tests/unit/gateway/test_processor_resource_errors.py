@@ -95,9 +95,14 @@ def _processor_with_stream(
         appended.append(list(inputs)) or len(inputs)
     )
 
+    thread_registry = MagicMock()
+    thread_registry.get_thread.return_value.configure_mock(
+        side_chat=False, expires_at=None, gc_claimed_at=None
+    )
+
     processor = GlobalProcessor(
         agent_manager=agent_manager,
-        thread_registry=MagicMock(),
+        thread_registry=thread_registry,
         audit_repo=MagicMock(),
         agent_repo=agent_repo,
         user_repo=MagicMock(),

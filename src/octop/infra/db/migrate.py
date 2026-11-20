@@ -1573,6 +1573,22 @@ def _sqlite_references_threads(db: DatabasePool, table: str) -> bool:
     return any(str(row["table"]) == "threads" for row in rows)
 
 
+def _ensure_side_chat_schema(db: DatabasePool) -> None:
+    """Add side-chat columns and expiry index idempotently."""
+    if not _table_exists(db, "threads"):
+        return
+    _ensure_column(db, "threads", "side_chat", "INTEGER NOT NULL DEFAULT 0")
+    _ensure_column(db, "threads", "source_thread_id", "TEXT")
+    _ensure_column(db, "threads", "copied_messages", "INTEGER NOT NULL DEFAULT 0")
+    _ensure_column(db, "threads", "expires_at", "INTEGER")
+    _ensure_column(db, "threads", "gc_claimed_at", "INTEGER")
+    with db.connect() as conn:
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_threads_side_chat_expiry "
+            "ON threads(expires_at) WHERE expires_at IS NOT NULL"
+        )
+
+
 def _ensure_thread_conversation_mode_schema(db: DatabasePool) -> None:
     if not _table_exists(db, "threads"):
         return
@@ -2261,6 +2277,11 @@ def _apply_sqlite_migration(db: DatabasePool, version: int, path: Path) -> None:
         _ensure_user_mfa_schema(db)
         _ensure_instance_lease_schema(db)
         _ensure_thread_contributed_schema(db)
+        with db.connect() as conn:
+            conn.execute("UPDATE _schema_version SET version = ?", (version,))
+        return
+    if version == 26:
+        _ensure_side_chat_schema(db)
         with db.connect() as conn:
             conn.execute("UPDATE _schema_version SET version = ?", (version,))
         return

@@ -277,48 +277,55 @@ function resolveMediaAgentId(chatAgentId: string, rawPath: string): string {
   return agentIdFromWorkspacePath(rawPath) || chatAgentId;
 }
 
-/** Rewrite mistaken ``workspace/download?path=/abs/…`` or cross-agent ``media/preview`` links. */
-export function canonicalizeMediaApiUrl(
-  url: string,
-  chatAgentId?: string | null,
-): string {
+function parseLocalMediaApiUrl(url: string) {
+  const origin =
+    typeof window === "undefined"
+      ? "http://octop.local"
+      : window.location.origin;
   try {
-    const parsed = url.startsWith("http")
-      ? new URL(url)
-      : new URL(url, "http://octop.local");
-    const pathMatch = parsed.pathname.match(
+    const parsed = new URL(url, origin);
+    if (parsed.origin !== origin) return;
+    const match = parsed.pathname.match(
       /^\/api\/agents\/([^/]+)\/(media\/preview|workspace\/download)$/,
     );
-    if (!pathMatch) return url;
-
-    const urlAgent = pathMatch[1];
-    const endpoint = pathMatch[2];
-
-    if (endpoint === "workspace/download") {
-      const pathParam = parsed.searchParams.get("path") || "";
-      const rel = extractWorkspaceRel(pathParam);
-      if (rel) {
-        const mediaAgent = agentIdFromWorkspacePath(pathParam) || urlAgent;
-        return workspaceDownloadUrl(mediaAgent, rel);
-      }
-      // Rebuild so workspaceDownloadUrl can normalize other shapes.
-      return workspaceDownloadUrl(urlAgent, pathParam);
-    }
-
-    const source = parsed.searchParams.get("source") || "";
-    if (!source) return url;
-    const rel = extractWorkspaceRel(source);
-    const mediaAgent =
-      agentIdFromWorkspacePath(source) || chatAgentId || urlAgent;
-    const mimeType = parsed.searchParams.get("mime_type") || undefined;
-    if (rel) {
-      return workspaceDownloadUrl(mediaAgent, rel);
-    }
-    if (mediaAgent !== urlAgent && source.startsWith("file://")) {
-      return agentMediaPreviewUrl(mediaAgent, source, mimeType);
-    }
+    if (!match) return;
+    return {
+      agentId: decodeURIComponent(match[1]),
+      endpoint: match[2],
+      params: parsed.searchParams,
+      parsed,
+    };
   } catch {
-    return url;
+    return;
+  }
+}
+
+/** Rewrite legacy workspace paths and links with an agent embedded in the source path. */
+export function canonicalizeMediaApiUrl(url: string): string {
+  const local = parseLocalMediaApiUrl(url);
+  if (!local) return url;
+  const { agentId, endpoint, params } = local;
+
+  if (endpoint === "workspace/download") {
+    const path = params.get("path") || "";
+    const rel = extractWorkspaceRel(path);
+    return workspaceDownloadUrl(
+      (rel && agentIdFromWorkspacePath(path)) || agentId,
+      rel || path,
+    );
+  }
+
+  const source = params.get("source");
+  if (!source) return url;
+  const rel = extractWorkspaceRel(source);
+  const mediaAgent = agentIdFromWorkspacePath(source) || agentId;
+  if (rel) return workspaceDownloadUrl(mediaAgent, rel);
+  if (mediaAgent !== agentId && source.startsWith("file://")) {
+    return agentMediaPreviewUrl(
+      mediaAgent,
+      source,
+      params.get("mime_type") || undefined,
+    );
   }
   return url;
 }
@@ -327,8 +334,9 @@ export function normalizeStoredMediaUrl(
   agentId: string | null | undefined,
   url: string,
 ): string {
-  if (!url.includes("/api/agents/")) return url;
-  const canonical = canonicalizeMediaApiUrl(url, agentId);
+  const local = parseLocalMediaApiUrl(url);
+  if (!local) return url;
+  const canonical = canonicalizeMediaApiUrl(url);
   if (canonical !== url) return canonical;
 
   if (!agentId || !url.includes("/workspace/download?")) return url;
@@ -340,7 +348,7 @@ export function normalizeStoredMediaUrl(
     if (!pathParam) return url;
     const rel = extractWorkspaceRel(pathParam);
     if (rel) {
-      const mediaAgent = agentIdFromWorkspacePath(pathParam) || agentId;
+      const mediaAgent = agentIdFromWorkspacePath(pathParam) || local.agentId;
       return workspaceDownloadUrl(mediaAgent, rel);
     }
   } catch {
@@ -360,10 +368,7 @@ export function resolveToolMediaUrl(
   const preview = options?.previewUrl?.trim();
   if (preview) {
     const normalized = agentId
-      ? canonicalizeMediaApiUrl(
-          normalizeStoredMediaUrl(agentId, preview),
-          agentId,
-        )
+      ? normalizeStoredMediaUrl(agentId, preview)
       : canonicalizeMediaApiUrl(preview);
     if (
       normalized.startsWith("/api/") ||
@@ -757,14 +762,10 @@ function imageItemFromPath(
   };
 }
 
-function withCanonicalUrls(
-  items: ToolMediaItem[],
-  chatAgentId?: string | null,
-): ToolMediaItem[] {
-  if (!chatAgentId) return items;
+function withCanonicalUrls<T extends { url: string }>(items: T[]): T[] {
   return items.map((item) => ({
     ...item,
-    url: canonicalizeMediaApiUrl(item.url, chatAgentId),
+    url: canonicalizeMediaApiUrl(item.url),
   }));
 }
 
@@ -775,6 +776,57 @@ function dedupeByUrl<T extends { url: string }>(items: T[]): T[] {
     seen.add(item.url);
     return true;
   });
+}
+
+export function dedupeToolMedia(items: ToolMediaItem[]): ToolMediaItem[] {
+  const seen = new Map<string, number>();
+  const result: ToolMediaItem[] = [];
+
+  for (const item of items) {
+    const local = parseLocalMediaApiUrl(item.url);
+    const path = local?.params.get(
+      local.endpoint === "media/preview" ? "source" : "path",
+    );
+    const key = JSON.stringify(
+      local && path
+        ? [item.kind, local.agentId, toMediaPreviewSource(path)]
+        : [item.kind, item.url],
+    );
+    const index = seen.get(key);
+    if (index === undefined) {
+      seen.set(key, result.length);
+      result.push(item);
+      continue;
+    }
+
+    const first = result[index];
+    const firstLocal = parseLocalMediaApiUrl(first.url);
+    const firstMime = firstLocal?.params.get("mime_type")?.trim().toLowerCase();
+    const hintedMime = [
+      first.mimeType,
+      local?.params.get("mime_type"),
+      item.mimeType,
+    ]
+      .map((mime) => mime?.trim().toLowerCase())
+      .find((mime) => mime?.startsWith(item.kind + "/"));
+    if (
+      firstLocal?.endpoint === "media/preview" &&
+      !firstMime?.startsWith(item.kind + "/") &&
+      hintedMime
+    ) {
+      firstLocal.params.set("mime_type", hintedMime);
+      const { parsed } = firstLocal;
+      result[index] = {
+        ...first,
+        url: first.url.startsWith("http")
+          ? parsed.href
+          : parsed.pathname + parsed.search + parsed.hash,
+        mimeType: hintedMime,
+      };
+    }
+  }
+
+  return result;
 }
 
 /** When tool output is plain text (e.g. browser screenshot summary), infer image path. */
@@ -830,14 +882,7 @@ export function collectToolMediaFromToolData(
 
   if (agentId && toolData) {
     const argPath = extractImagePathFromToolArgs(toolData.arguments);
-    if (argPath) {
-      const already = images.some(
-        (img) => img.filename === argPath.split("/").pop(),
-      );
-      if (!already) {
-        images.push(imageItemFromPath(agentId, argPath));
-      }
-    }
+    if (argPath) images.push(imageItemFromPath(agentId, argPath));
     if (
       images.length === 0 &&
       toolData.output &&
@@ -868,13 +913,8 @@ export function collectToolMediaFromToolData(
   }
 
   return {
-    images: withCanonicalUrls(dedupeByUrl(images), agentId),
-    videos: withCanonicalUrls(dedupeByUrl(videos), agentId),
-    files: dedupeByUrl(
-      files.map((file) => ({
-        ...file,
-        url: agentId ? canonicalizeMediaApiUrl(file.url, agentId) : file.url,
-      })),
-    ),
+    images: dedupeToolMedia(withCanonicalUrls(images)),
+    videos: dedupeToolMedia(withCanonicalUrls(videos)),
+    files: dedupeByUrl(withCanonicalUrls(files)),
   };
 }

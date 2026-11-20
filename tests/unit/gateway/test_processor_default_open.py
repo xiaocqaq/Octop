@@ -13,6 +13,14 @@ from octop.infra.gateway.process.processor import GlobalProcessor
 from octop.infra.gateway.slash.dispatcher import SlashDispatcher
 
 
+def _thread_registry() -> MagicMock:
+    registry = MagicMock()
+    registry.get_thread.return_value.configure_mock(
+        side_chat=False, expires_at=None, gc_claimed_at=None
+    )
+    return registry
+
+
 @pytest.mark.asyncio
 async def test_im_call_merges_default_open_mcp_servers() -> None:
     captured: dict[str, object] = {}
@@ -35,7 +43,7 @@ async def test_im_call_merges_default_open_mcp_servers() -> None:
     )
     agent_manager.get_thread_model = MagicMock(return_value=None)
 
-    thread_registry = MagicMock()
+    thread_registry = _thread_registry()
     thread_registry.get_or_create_by_key = AsyncMock(return_value="thr-im")
     thread_registry.touch_last_active = MagicMock()
     thread_registry.set_title_if_null = MagicMock()
@@ -99,7 +107,7 @@ async def test_im_call_skips_default_open_mcp_for_team_host() -> None:
     )
     agent_manager.get_thread_model = MagicMock(return_value=None)
 
-    thread_registry = MagicMock()
+    thread_registry = _thread_registry()
     thread_registry.get_or_create_by_key = AsyncMock(return_value="thr-im")
     thread_registry.touch_last_active = MagicMock()
     thread_registry.set_title_if_null = MagicMock()
@@ -155,7 +163,7 @@ async def test_dashboard_request_ignores_explicit_mcp_for_team_host() -> None:
 
     processor = GlobalProcessor(
         agent_manager=agent_manager,
-        thread_registry=MagicMock(),
+        thread_registry=_thread_registry(),
         audit_repo=MagicMock(),
         agent_repo=MagicMock(get=MagicMock(return_value=MagicMock(default_model=None))),
         user_repo=MagicMock(),
@@ -205,7 +213,7 @@ async def test_dashboard_request_trusts_explicit_opt_out() -> None:
 
     processor = GlobalProcessor(
         agent_manager=agent_manager,
-        thread_registry=MagicMock(),
+        thread_registry=_thread_registry(),
         audit_repo=MagicMock(),
         agent_repo=MagicMock(get=MagicMock(return_value=MagicMock(default_model=None))),
         user_repo=MagicMock(),
@@ -262,7 +270,7 @@ async def test_dashboard_request_attaches_knowledge_base_ids_without_prepending(
     )
     processor = GlobalProcessor(
         agent_manager=agent_manager,
-        thread_registry=MagicMock(),
+        thread_registry=_thread_registry(),
         audit_repo=MagicMock(),
         agent_repo=MagicMock(get=MagicMock(return_value=MagicMock(default_model=None))),
         user_repo=MagicMock(),

@@ -19,6 +19,7 @@ from octop_gateway.models import (
 from octop.api.common.agent import require_agent_row
 from octop.api.common.validators import validate_chat_mcp_servers, validate_chat_skills
 from octop.api.routers.chat.models import ChatTurnBody
+from octop.infra.agents.threads.side_chat import require_live_thread, side_chat_key
 from octop.infra.errors import ErrorCode, OctopError
 from octop.infra.gateway.media.attachment_hints import (
     inbound_attachments_from_parts,
@@ -66,13 +67,24 @@ async def resolve_thread_id(
     thread_id: str | None,
     session_key: str | None,
 ) -> tuple[str, str]:
+    # Side-chat keys are reserved server routes; retain ordinary dashboard keys
+    # for compatibility, but never select a side chat from a client key alone.
     sk = session_key or ThreadRegistry.dashboard_key(agent_id=agent_id, user_id=user_id)
+    if ":sidechat:" in sk:
+        sk = ThreadRegistry.dashboard_key(agent_id=agent_id, user_id=user_id)
     if thread_id:
         row = thread_registry.get_thread(thread_id)
         if row is None or row.agent_id != agent_id:
             raise OctopError(ErrorCode.AGENT_NOT_FOUND, f"thread {thread_id!r} not found")
         if not thread_visible_to(row, user_id):
             raise OctopError(ErrorCode.FORBIDDEN, "thread not owned by user")
+        require_live_thread(row)
+        if thread_id in getattr(thread_registry, "snapshotting_threads", set()):
+            raise OctopError(ErrorCode.THREAD_TURN_ACTIVE, "thread snapshot in progress")
+        if getattr(row, "side_chat", False):
+            if row.user_id != user_id:
+                raise OctopError(ErrorCode.FORBIDDEN, "thread not owned by user")
+            sk = side_chat_key(agent_id=agent_id, user_id=user_id, thread_id=thread_id)
         await thread_registry.rebind(
             session_key=sk,
             thread_id=thread_id,
@@ -82,6 +94,10 @@ async def resolve_thread_id(
         return thread_id, sk
     bound = thread_registry.get_bound_thread_id(sk)
     if bound:
+        row = thread_registry.get_thread(bound)
+        require_live_thread(row)
+        if bound in getattr(thread_registry, "snapshotting_threads", set()):
+            raise OctopError(ErrorCode.THREAD_TURN_ACTIVE, "thread snapshot in progress")
         return bound, sk
     tid = await thread_registry.get_or_create_by_key(
         session_key=sk,
