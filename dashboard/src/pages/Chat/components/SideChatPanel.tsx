@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, Button } from "antd";
-import { MessageSquare, Save, X } from "lucide-react";
+import { MessageSquare, PanelRightClose, Save, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { OctopThread } from "../../../api/modules/octopThreads";
 import type { ResolvedModel } from "../../../api/types";
@@ -27,8 +27,10 @@ export interface SideChatPanelProps {
   agentId: string;
   thread: OctopThread;
   onClose: () => void;
+  onHide?: () => void;
   onPersist: () => Promise<void>;
   saving?: boolean;
+  active?: boolean;
   disabled?: boolean;
   availableModels?: ResolvedModel[];
 }
@@ -46,8 +48,10 @@ function SideChatPanelContent({
   agentId,
   thread,
   onClose,
+  onHide,
   onPersist,
   saving = false,
+  active = true,
   disabled = false,
   availableModels,
 }: SideChatPanelProps) {
@@ -244,6 +248,8 @@ function SideChatPanelContent({
           <Button
             size="small"
             icon={<Save size={14} />}
+            autoInsertSpace={false}
+            aria-label={t("chat.sideChat.save")}
             loading={saving}
             disabled={
               disabled ||
@@ -255,8 +261,18 @@ function SideChatPanelContent({
             }
             onClick={() => void onPersist()}
           >
-            {t(saving ? "chat.sideChat.saving" : "chat.sideChat.save")}
+            {t("chat.sideChat.save")}
           </Button>
+          {onHide && (
+            <Button
+              type="text"
+              size="small"
+              icon={<PanelRightClose size={17} />}
+              aria-label={t("chat.sideChat.hide")}
+              title={t("chat.sideChat.hide")}
+              onClick={onHide}
+            />
+          )}
           <Button
             type="text"
             size="small"
@@ -344,15 +360,14 @@ function SideChatPanelContent({
       )}
       <div className={styles.composer}>
         <ChatInput
+          active={active}
           agentId={agentId}
           threadId={threadId}
           onSend={handleSend}
           onCancel={() => {
             if (!unavailable) cancelStream();
           }}
-          onNewChat={() => {
-            if (!saving) onClose();
-          }}
+          onNewChat={() => onHide?.()}
           isStreaming={isStreaming}
           disabled={inputDisabled || (pendingHitl && !pendingAsk)}
           availableModels={availableModels}

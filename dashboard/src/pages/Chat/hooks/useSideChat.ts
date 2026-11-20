@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import {
   octopThreadsApi,
   type OctopThread,
@@ -7,25 +7,42 @@ import { isNotFoundApiError, parseApiError } from "../../../utils/apiError";
 import * as chatStore from "./chatStore";
 
 interface SideChatEntry {
+  ownerId: number | null;
   agentId: string;
-  thread: OctopThread;
-  saved: boolean;
-  persisting?: Promise<void>;
-  discarding?: Promise<void>;
+  sourceThreadId: string;
+  thread: OctopThread | null;
+  visible: boolean;
+  opening: boolean;
+  closing: boolean;
+  saving: boolean;
 }
 
-function discardSideChat(entry: SideChatEntry): Promise<void> {
-  entry.discarding ??= deleteSideChat(entry).catch((error) => {
-    entry.discarding = undefined;
-    throw error;
-  });
-  return entry.discarding;
+export interface RetainedSideChat {
+  readonly agentId: string;
+  readonly sourceThreadId: string;
+  readonly thread: OctopThread;
+}
+
+// Page-local memory only: the server remains responsible for the 24-hour TTL.
+const entries = new Map<string, SideChatEntry>();
+const listeners = new Set<() => void>();
+let revision = 0;
+function notify() {
+  revision += 1;
+  listeners.forEach((listener) => listener());
+}
+function subscribe(listener: () => void) {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+function getSnapshot() {
+  return revision;
 }
 
 async function deleteSideChat(entry: SideChatEntry): Promise<void> {
-  // A navigation racing Save must never delete the newly saved conversation.
-  await entry.persisting?.catch(() => undefined);
-  if (entry.saved) return;
+  if (!entry.thread) return;
   const id = entry.thread.thread_id;
   chatStore.cancelStream(id, { agentId: entry.agentId, threadId: id });
   for (let attempt = 0; ; attempt += 1) {
@@ -46,120 +63,151 @@ async function deleteSideChat(entry: SideChatEntry): Promise<void> {
   chatStore.removeSession(id);
 }
 
-/** A temporary child belongs to the currently open parent, never its sidebar binding. */
+/** A temporary child stays with its parent across navigation and page remounts. */
 export function useSideChat(
   agentId: string | null,
   sourceThreadId: string | null,
+  ownerId: number | null = null,
 ) {
-  const [thread, setThread] = useState<OctopThread | null>(null);
-  const [opening, setOpening] = useState(false);
-  const [closing, setClosing] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const entryRef = useRef<SideChatEntry | null>(null);
-  const operationRef = useRef(false);
-  const generationRef = useRef(0);
-  const scopeRef = useRef({ agentId, sourceThreadId });
-  scopeRef.current = { agentId, sourceThreadId };
-
+  const key =
+    agentId && sourceThreadId
+      ? JSON.stringify([ownerId, agentId, sourceThreadId])
+      : null;
+  useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  const entry = key ? entries.get(key) : undefined;
+  const scopeRef = useRef(key);
+  const mountedRef = useRef(true);
+  scopeRef.current = key;
   useEffect(() => {
-    setThread(null);
-    setOpening(false);
-    setClosing(false);
-    setSaving(false);
-    operationRef.current = false;
+    mountedRef.current = true;
     return () => {
-      generationRef.current += 1;
-      const entry = entryRef.current;
-      entryRef.current = null;
-      if (entry) {
-        // TTL is the fallback if navigation or a network failure interrupts cleanup.
-        void discardSideChat(entry).catch(() => {
-          chatStore.removeSession(entry.thread.thread_id);
-        });
-      }
+      mountedRef.current = false;
     };
-  }, [agentId, sourceThreadId]);
+  }, []);
 
   const open = useCallback(async () => {
-    if (!agentId || !sourceThreadId || operationRef.current || entryRef.current)
-      return false;
-    const generation = generationRef.current;
-    operationRef.current = true;
-    setOpening(true);
+    if (!key || !agentId || !sourceThreadId) return false;
+    const existing = entries.get(key);
+    if (existing) {
+      existing.visible = true;
+      notify();
+      return !existing.opening && !existing.closing;
+    }
+    const next: SideChatEntry = {
+      ownerId,
+      agentId,
+      sourceThreadId,
+      thread: null,
+      visible: true,
+      opening: true,
+      closing: false,
+      saving: false,
+    };
+    entries.set(key, next);
+    notify();
     try {
-      const created = await octopThreadsApi.createSideChat(
+      next.thread = await octopThreadsApi.createSideChat(
         agentId,
         sourceThreadId,
       );
-      const entry: SideChatEntry = { agentId, thread: created, saved: false };
-      if (
-        generation !== generationRef.current ||
-        scopeRef.current.agentId !== agentId ||
-        scopeRef.current.sourceThreadId !== sourceThreadId
-      ) {
-        await discardSideChat(entry).catch(() =>
-          chatStore.removeSession(created.thread_id),
-        );
-        return false;
-      }
-      entryRef.current = entry;
-      setThread(created);
-      return true;
+      return mountedRef.current && scopeRef.current === key;
+    } catch (error) {
+      if (entries.get(key) === next) entries.delete(key);
+      throw error;
     } finally {
-      if (generation === generationRef.current) {
-        operationRef.current = false;
-        setOpening(false);
-      }
+      next.opening = false;
+      notify();
     }
-  }, [agentId, sourceThreadId]);
+  }, [agentId, key, ownerId, sourceThreadId]);
 
   const close = useCallback(async () => {
-    const entry = entryRef.current;
-    if (!entry || operationRef.current) return;
-    const generation = generationRef.current;
-    operationRef.current = true;
-    setClosing(true);
+    const current = key ? entries.get(key) : undefined;
+    if (
+      !key ||
+      !current ||
+      current.opening ||
+      current.closing ||
+      current.saving
+    )
+      return;
+    current.closing = true;
+    notify();
     try {
-      await discardSideChat(entry);
-      if (entryRef.current === entry) {
-        entryRef.current = null;
-        setThread(null);
-      }
+      await deleteSideChat(current);
+      if (entries.get(key) === current) entries.delete(key);
     } finally {
-      if (generation === generationRef.current) {
-        operationRef.current = false;
-        setClosing(false);
-      }
+      current.closing = false;
+      notify();
     }
-  }, []);
+  }, [key]);
 
   const persist = useCallback(async () => {
-    const entry = entryRef.current;
-    if (!entry || operationRef.current) return false;
-    const generation = generationRef.current;
-    operationRef.current = true;
-    setSaving(true);
-    entry.persisting = (async () => {
-      await octopThreadsApi.persistSideChat(
-        entry.agentId,
-        entry.thread.thread_id,
-      );
-      entry.saved = true;
-    })();
+    const current = key ? entries.get(key) : undefined;
+    if (
+      !key ||
+      !current?.thread ||
+      current.opening ||
+      current.closing ||
+      current.saving
+    )
+      return false;
+    current.saving = true;
+    notify();
     try {
-      await entry.persisting;
-      if (entryRef.current === entry) {
-        entryRef.current = null;
-        setThread(null);
-      }
+      await octopThreadsApi.persistSideChat(
+        current.agentId,
+        current.thread.thread_id,
+      );
+      if (entries.get(key) === current) entries.delete(key);
       return true;
-    } finally {
-      if (generation === generationRef.current) {
-        operationRef.current = false;
-        setSaving(false);
+    } catch (error) {
+      if (isNotFoundApiError(error) && entries.get(key) === current) {
+        entries.delete(key);
+        chatStore.removeSession(current.thread.thread_id);
       }
+      throw error;
+    } finally {
+      current.saving = false;
+      notify();
     }
-  }, []);
+  }, [key]);
 
-  return { thread, opening, closing, saving, open, close, persist };
+  const hide = useCallback(() => {
+    const current = key ? entries.get(key) : undefined;
+    if (current) {
+      current.visible = false;
+      notify();
+    }
+  }, [key]);
+  const show = useCallback(() => {
+    const current = key ? entries.get(key) : undefined;
+    if (current) {
+      current.visible = true;
+      notify();
+    }
+  }, [key]);
+
+  const retainedChats: readonly RetainedSideChat[] = Array.from(
+    entries.values(),
+  )
+    .filter((candidate) => candidate.ownerId === ownerId && candidate.thread)
+    .map((candidate) => ({
+      agentId: candidate.agentId,
+      sourceThreadId: candidate.sourceThreadId,
+      thread: candidate.thread!,
+    }));
+
+  return {
+    thread: entry?.thread ?? null,
+    opening: entry?.opening ?? false,
+    closing: entry?.closing ?? false,
+    saving: entry?.saving ?? false,
+    visible: entry?.visible ?? false,
+    retainedChats,
+    open,
+    close,
+    persist,
+    hide,
+    show,
+  };
 }

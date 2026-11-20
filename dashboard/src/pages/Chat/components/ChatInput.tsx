@@ -33,6 +33,10 @@ import ChatInputActionsRow from "./ChatInputActionsRow";
 import ChatQueuedMessages from "./ChatQueuedMessages";
 import { useVoiceInput } from "../../../hooks/useVoiceInput";
 import { useChatAttachments } from "../hooks/useChatAttachments";
+import {
+  forgetDesktopDropTarget,
+  rememberDesktopDropTarget,
+} from "../../../utils/desktopFileDrop";
 import { onSteerRestore } from "../hooks/chatStore";
 import { useSlashMentionInput } from "../hooks/useSlashMentionInput";
 import { stripThinkingTags } from "../utils/chatAttachments";
@@ -98,6 +102,8 @@ interface ChatInputProps {
   /** Team room: the host turn itself can still be interrupted while it is the only speaker. */
   isTeam?: boolean;
   disabled?: boolean;
+  /** Whether this composer is eligible for desktop-shell file drops. */
+  active?: boolean;
   /** Pre-fill the input with this text on mount (e.g. navigated from another page). */
   initialText?: string;
   /** Called when the composer is cleared after a successful send/queue. */
@@ -172,6 +178,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
       holdSend = false,
       isTeam = false,
       disabled,
+      active = true,
       initialText = "",
       onComposerCleared,
       availableModels,
@@ -222,16 +229,36 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
     useEffect(() => {
       const el = shellRef.current;
       if (!el) return;
-      const sync = () => {
-        setNativeDropActive(el.classList.contains("file-drop-target-active"));
+      const sync = (records: MutationRecord[] = []) => {
+        const eligible = active && !disabled;
+        const marked = el.classList.contains("file-drop-target-active");
+        setNativeDropActive(eligible && marked);
+        // Path expansion can finish after the shell has cleared its marker.
+        if (
+          eligible &&
+          (marked ||
+            records.some(
+              (record) =>
+                record.oldValue
+                  ?.split(/\s+/)
+                  .includes("file-drop-target-active"),
+            ))
+        ) {
+          rememberDesktopDropTarget(el);
+        }
       };
+      sync();
       const observer = new MutationObserver(sync);
       observer.observe(el, {
         attributes: true,
         attributeFilter: ["class"],
+        attributeOldValue: true,
       });
-      return () => observer.disconnect();
-    }, []);
+      return () => {
+        observer.disconnect();
+        forgetDesktopDropTarget(el);
+      };
+    }, [active, disabled]);
     const keepComposerInView =
       typeof window !== "undefined" &&
       !isPwaDisplay() &&
@@ -287,6 +314,11 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
       onText: applyVoiceText,
     });
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const canHandleDesktopDrop = useCallback(
+      (target: HTMLElement | null) =>
+        Boolean(active && !disabled && target === shellRef.current),
+      [active, disabled],
+    );
     const {
       attachments,
       uploading,
@@ -305,7 +337,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
       handleDragLeave,
       handleDragOver,
       handleDrop,
-    } = useChatAttachments(agentId);
+    } = useChatAttachments(agentId, { canHandleDesktopDrop });
 
     // Expose an imperative handle so the parent can push a new prefill without
     // triggering a prop change that would cause a re-render cascade.
@@ -874,7 +906,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
       <div
         ref={shellRef}
         id="octop-chat-file-drop"
-        data-file-drop-target=""
+        data-file-drop-target={active && !disabled ? "" : undefined}
         data-octop-chat-drop="1"
         className={cx(styles.chatInput, showDrop && styles.dropActive)}
         onDragEnter={handleDragEnter}

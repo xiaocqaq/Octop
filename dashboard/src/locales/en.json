@@ -1584,8 +1584,10 @@
     "sideChat": {
       "title": "Side chat",
       "open": "Open side chat",
-      "temporaryHint": "Inherits the current context. New messages stay separate; close to discard or save as an independent chat.",
-      "save": "Save as chat",
+      "temporaryHint": "Inherits the current context. Switching chats or hiding keeps it; click × to discard, or save as an independent chat.",
+      "hide": "Hide side chat",
+      "resize": "Resize side chat",
+      "save": "Save",
       "saving": "Saving",
       "close": "Close side chat",
       "loadFailed": "Failed to load side chat history",

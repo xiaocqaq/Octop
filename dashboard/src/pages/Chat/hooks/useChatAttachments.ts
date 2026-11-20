@@ -14,6 +14,8 @@ import { apiErrorMessage } from "../../../utils/apiError";
 import { inferAttachmentKind } from "../utils/chatAttachments";
 import {
   DESKTOP_FILE_DROP_EVENT,
+  claimDesktopDropEvent,
+  desktopDropTargetForEvent,
   filesFromDesktopDrop,
   type DesktopFileDropDetail,
 } from "../../../utils/desktopFileDrop";
@@ -37,7 +39,14 @@ function newUploadDraft() {
   };
 }
 
-export function useChatAttachments(agentId: string | null | undefined) {
+export interface UseChatAttachmentsOptions {
+  canHandleDesktopDrop?: (target: HTMLElement | null) => boolean;
+}
+
+export function useChatAttachments(
+  agentId: string | null | undefined,
+  options: UseChatAttachmentsOptions = {},
+) {
   const { t } = useTranslation();
   const { maxUploadBytes, maxUploadMb } = useServerUploadLimit();
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
@@ -48,6 +57,7 @@ export function useChatAttachments(agentId: string | null | undefined) {
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
+  const canHandleDesktopDrop = options.canHandleDesktopDrop;
 
   const runUploadQueue = useCallback(() => {
     while (activeUploadsRef.current < CHAT_UPLOAD_CONCURRENCY) {
@@ -352,6 +362,9 @@ export function useChatAttachments(agentId: string | null | undefined) {
 
   useEffect(() => {
     const onDesktopDrop = (event: Event) => {
+      const target = desktopDropTargetForEvent(event);
+      if (canHandleDesktopDrop && !canHandleDesktopDrop(target)) return;
+      if (!claimDesktopDropEvent(event)) return;
       const detail = (event as CustomEvent<DesktopFileDropDetail>).detail;
       const draft = uploadDraftRef.current;
       draft.batches += 1;
@@ -386,7 +399,7 @@ export function useChatAttachments(agentId: string | null | undefined) {
     window.addEventListener(DESKTOP_FILE_DROP_EVENT, onDesktopDrop);
     return () =>
       window.removeEventListener(DESKTOP_FILE_DROP_EVENT, onDesktopDrop);
-  }, [processFiles, finishUploadBatch, t]);
+  }, [processFiles, finishUploadBatch, t, canHandleDesktopDrop]);
 
   return {
     attachments,

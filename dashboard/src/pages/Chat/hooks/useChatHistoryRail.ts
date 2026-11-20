@@ -18,10 +18,14 @@ export function useChatHistoryRail(): HTMLElement | null {
       setRail(document.getElementById(CHAT_HISTORY_RAIL_ID));
     };
     sync();
+    // Responsive navigation can replace the mount without changing route or pane.
+    const observer = new MutationObserver(sync);
+    observer.observe(document.body, { childList: true, subtree: true });
     // Layout mode / pane / route swaps remount or clear the rail after paint.
     const raf = window.requestAnimationFrame(sync);
     const t = window.setTimeout(sync, 0);
     return () => {
+      observer.disconnect();
       window.cancelAnimationFrame(raf);
       window.clearTimeout(t);
     };

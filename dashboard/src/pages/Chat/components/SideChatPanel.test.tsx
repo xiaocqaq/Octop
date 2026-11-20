@@ -348,25 +348,40 @@ describe("SideChatPanel", () => {
     fireEvent.click(screen.getByText("chat.sideChat.save"));
     await waitFor(() => expect(panelProps.onPersist).toHaveBeenCalledOnce());
     expect(panelProps.onClose).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText("new chat"));
+    expect(panelProps.onClose).not.toHaveBeenCalled();
     fireEvent.click(
       screen.getByRole("button", { name: "chat.sideChat.close" }),
     );
-    fireEvent.click(screen.getByText("new chat"));
-    expect(panelProps.onClose).toHaveBeenCalledTimes(2);
+    expect(panelProps.onClose).toHaveBeenCalledOnce();
     rerender(<SideChatPanel {...panelProps} saving />);
     const savingButton = screen.getByRole("button", {
-      name: /chat.sideChat.saving/,
+      name: "chat.sideChat.save",
     });
     expect(savingButton.hasAttribute("disabled")).toBe(true);
     expect(savingButton.className).toContain("loading");
     fireEvent.click(screen.getByText("new chat"));
-    expect(panelProps.onClose).toHaveBeenCalledTimes(2);
+    expect(panelProps.onClose).toHaveBeenCalledOnce();
     expect(inputProps.disabled).toBe(true);
     expect(
       screen
         .getByRole("button", { name: "chat.sideChat.close" })
         .hasAttribute("disabled"),
     ).toBe(true);
+  });
+
+  it("lets the header hide the side chat without discarding it", () => {
+    const panelProps = props();
+    const onHide = vi.fn();
+    render(<SideChatPanel {...panelProps} onHide={onHide} />);
+    fireEvent.click(screen.getByRole("button", { name: "chat.sideChat.hide" }));
+    expect(onHide).toHaveBeenCalledOnce();
+    expect(panelProps.onClose).not.toHaveBeenCalled();
+    fireEvent.click(
+      screen.getByRole("button", { name: "chat.sideChat.close" }),
+    );
+    expect(panelProps.onClose).toHaveBeenCalledOnce();
+    expect(onHide).toHaveBeenCalledOnce();
   });
 
   it("locks sends, HITL and saving while disabled or streaming", () => {

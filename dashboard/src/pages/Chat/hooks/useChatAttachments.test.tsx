@@ -416,6 +416,93 @@ describe("useChatAttachments drop", () => {
     expect(message.warning).toHaveBeenCalledWith("No files to upload");
   });
 
+  it("lets only the eligible hook claim a desktop window event", async () => {
+    const fetchDrop = vi.fn(async () => new Response("note"));
+    vi.stubGlobal("fetch", fetchDrop);
+    try {
+      const { result, rerender } = renderHook(
+        ({ sideActive }) => ({
+          side: useChatAttachments("side-agent", {
+            canHandleDesktopDrop: () => sideActive,
+          }),
+          main: useChatAttachments("main-agent", {
+            canHandleDesktopDrop: () => true,
+          }),
+        }),
+        { initialProps: { sideActive: false } },
+      );
+      const dispatchDrop = () =>
+        window.dispatchEvent(
+          new CustomEvent(DESKTOP_FILE_DROP_EVENT, {
+            detail: {
+              files: [{ name: "note.txt", url: "http://localhost/drop/note" }],
+            },
+          }),
+        );
+      await act(async () => {
+        dispatchDrop();
+      });
+      await waitFor(() =>
+        expect(result.current.main.attachments).toHaveLength(1),
+      );
+      expect(result.current.side.attachments).toEqual([]);
+      expect(result.current.side.uploading).toBe(false);
+      expect(fetchDrop).toHaveBeenCalledTimes(1);
+      expect(uploadFile).toHaveBeenCalledTimes(1);
+      expect(uploadFile).toHaveBeenLastCalledWith(
+        "main-agent",
+        expect.any(File),
+        expect.any(Function),
+        expect.any(AbortSignal),
+      );
+
+      rerender({ sideActive: true });
+      await act(async () => {
+        dispatchDrop();
+      });
+      await waitFor(() => expect(uploadFile).toHaveBeenCalledTimes(2));
+      expect(fetchDrop).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("keeps a rejected desktop event from affecting ordinary HTML file drops", async () => {
+    const fetchDrop = vi.fn();
+    vi.stubGlobal("fetch", fetchDrop);
+    try {
+      const { result } = renderHook(() =>
+        useChatAttachments("agent-1", { canHandleDesktopDrop: () => false }),
+      );
+      act(() => {
+        window.dispatchEvent(
+          new CustomEvent(DESKTOP_FILE_DROP_EVENT, {
+            detail: { files: [], truncated: true },
+          }),
+        );
+      });
+      expect(fetchDrop).not.toHaveBeenCalled();
+      expect(message.warning).not.toHaveBeenCalled();
+      expect(result.current.uploading).toBe(false);
+      const file = new File(["html"], "html.txt");
+      await act(async () => {
+        await result.current.handleDrop(
+          dragEvent({
+            dataTransfer: {
+              types: ["Files"],
+              items: [{ kind: "file", getAsFile: () => file }],
+              files: [file],
+            } as unknown as DataTransfer,
+          }),
+        );
+      });
+      expect(uploadFile).toHaveBeenCalledTimes(1);
+      expect(result.current.attachments[0]?.filename).toBe("html.txt");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("uploads files delivered by the desktop shell", async () => {
     vi.stubGlobal(
       "fetch",
