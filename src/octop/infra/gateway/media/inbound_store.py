@@ -8,6 +8,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 from octop.config import DEFAULT_MAX_UPLOAD_MB, upload_mb_to_bytes
 from octop.infra.agents.workspace.dir import (
@@ -233,6 +234,7 @@ ALLOWED_INBOUND_MEDIA_TYPES = frozenset(
 _UNSAFE_FILENAME_CHARS = re.compile(r'[\x00-\x1f\x7f<>:"/\\|?*]')
 # ``1783510288_report.pdf`` / ``1783510288_report-2.pdf`` stored names.
 _STORED_TS_PREFIX = re.compile(r"^(\d{10,})_(.+)$")
+_STORED_UUID_PREFIX = re.compile(r"^uuid-[0-9a-f]{32}_(.+)$")
 
 
 @dataclass(frozen=True)
@@ -397,10 +399,12 @@ def sanitize_inbound_filename(filename: str) -> str:
 
 
 def display_name_from_stored(stored_name: str) -> str:
-    """Strip ``{unix_ts}_`` prefix from on-disk basename when present."""
+    """Strip storage prefixes, including legacy timestamp-only names."""
     match = _STORED_TS_PREFIX.match(stored_name)
     if match and match.group(2):
-        return match.group(2)
+        display = match.group(2)
+        unique = _STORED_UUID_PREFIX.match(display)
+        return unique.group(1) if unique else display
     return stored_name or "upload.bin"
 
 
@@ -411,20 +415,6 @@ def build_timestamped_inbound_name(filename: str, *, now: int | None = None) -> 
     return f"{ts}_{display}"
 
 
-async def _unique_inbound_path(workspace: BackendWorkspace, stored_name: str) -> str:
-    """Pick ``inbound/{name}``, or ``inbound/{stem}-{n}{suffix}`` on collision."""
-    candidate = f"{INBOUND_DIR}/{stored_name}"
-    if not await workspace.aexists(candidate):
-        return candidate
-    stem = Path(stored_name).stem
-    suffix = Path(stored_name).suffix
-    for index in range(2, 1000):
-        alt = f"{INBOUND_DIR}/{stem}-{index}{suffix}"
-        if not await workspace.aexists(alt):
-            return alt
-    raise OctopError(ErrorCode.INTERNAL_ERROR, f"cannot allocate unique path for {stored_name!r}")
-
-
 async def write_inbound(
     workspace: BackendWorkspace,
     data: bytes,
@@ -433,7 +423,7 @@ async def write_inbound(
     media_type: str,
     max_bytes: int | None = None,
 ) -> InboundFile:
-    """Persist bytes under ``inbound/{unix_ts}_{original}``."""
+    """Persist bytes under a unique key in ``inbound/``."""
     validate_inbound_size(data, max_bytes=max_bytes)
     normalized_type = validate_inbound_media_type(media_type, filename)
 
@@ -441,7 +431,16 @@ async def write_inbound(
     if not Path(display_name).suffix:
         display_name = f"{display_name}{inbound_extension(display_name, normalized_type)}"
     stored_name = build_timestamped_inbound_name(display_name)
-    path = await _unique_inbound_path(workspace, stored_name)
+    ts, _, original = stored_name.partition("_")
+    # Independent random keys avoid check-then-upload races across processes/backends.
+    unique = f"uuid-{uuid4().hex}"
+    basename = f"{ts}_{unique}_{original}"
+    # Keep previously valid long basenames intact on 255-byte filesystems.
+    path = (
+        f"{INBOUND_DIR}/{unique}/{stored_name}"
+        if len(basename.encode("utf-8")) > 255
+        else f"{INBOUND_DIR}/{basename}"
+    )
     await workspace.aupload_bytes(path, data)
     return InboundFile(
         path=path,

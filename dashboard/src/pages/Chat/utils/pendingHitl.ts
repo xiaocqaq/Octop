@@ -6,7 +6,10 @@ import {
   type AskQuestion,
 } from "../../../api/types/hitl";
 import type { ChatMessage, HitlActionRequest } from "../hooks/sseHelpers";
-import type { HitlSessionPolicy } from "./hitlSessionPolicy";
+import {
+  KNOWLEDGE_WRITE_TOOL_NAMES,
+  type HitlSessionPolicy,
+} from "./hitlSessionPolicy";
 
 export type PendingAsk = {
   messageId: string;
@@ -75,7 +78,13 @@ export function findAutoResumableApproval(
   messages: ChatMessage[],
 ): PendingApproval | null {
   const pending = findPendingApproval(messages);
-  if (!pending) return null;
+  if (
+    !pending ||
+    pending.actions.some((action) =>
+      KNOWLEDGE_WRITE_TOOL_NAMES.has(action.name),
+    )
+  )
+    return null;
   if (policy.mode === "allow_all") return pending;
   if (policy.mode === "allow_tools") {
     const allowed = new Set(policy.tools ?? []);

@@ -3,7 +3,6 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import AvatarDropdown from "../components/AvatarDropdown";
-import CurrentVersionBadge from "../components/CurrentVersionBadge";
 import {
   ArrowLeftRight,
   ChevronDown,
@@ -561,27 +560,19 @@ export default function Sidebar({
   };
 
   const brandInner = (
-    <>
-      <img
-        src={isRailCollapsed ? publicUrl("logo_mark.svg") : wordmarkSrc}
-        alt="mxiao"
-        className={isRailCollapsed ? styles.brandMarkCollapsed : undefined}
-        style={{
-          height: isRailCollapsed ? 22 : isMobile ? 28 : 26,
-          width: "auto",
-          maxWidth: isRailCollapsed ? 28 : isMobile ? 136 : 124,
-          objectFit: "contain",
-          display: "block",
-          flexShrink: 0,
-        }}
-      />
-      {!isRailCollapsed && !isMobile && (
-        /* Let the version badges shrink without squeezing the wordmark. */
-        <div className={styles.brandMeta}>
-          <CurrentVersionBadge isMobile={isMobile} />
-        </div>
-      )}
-    </>
+    <img
+      src={isRailCollapsed ? publicUrl("logo_mark.svg") : wordmarkSrc}
+      alt="mxiao"
+      className={isRailCollapsed ? styles.brandMarkCollapsed : undefined}
+      style={{
+        height: isRailCollapsed ? 22 : isMobile ? 28 : 26,
+        width: "auto",
+        maxWidth: isRailCollapsed ? 28 : isMobile ? 136 : 124,
+        objectFit: "contain",
+        display: "block",
+        flexShrink: 0,
+      }}
+    />
   );
 
   const userFooter = (

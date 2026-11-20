@@ -21,7 +21,7 @@ vi.mock("../components/AppVersionBadge", () => ({
   default: () => null,
 }));
 vi.mock("../components/CurrentVersionBadge", () => ({
-  default: () => null,
+  default: () => <span>v1.0.3b7</span>,
 }));
 vi.mock("../hooks/useUpdateStatus", () => ({
   useUpdateStatus: () => ({ hasUpdate: false }),
@@ -50,12 +50,11 @@ function renderSidebar(opts: {
 }
 
 /**
- * Desktop fold control sits in the brand row, to the right of the version
- * and against the rail's right edge.
+ * Desktop fold control sits at the right edge of the brand row.
  */
 describe("nav rail fold control", () => {
   beforeEach(() => {
-    localStorage.removeItem(LAYOUT_MODE_KEY);
+    localStorage.setItem(LAYOUT_MODE_KEY, "classic");
   });
 
   it("places the fold button at the end of the brand row", async () => {
@@ -75,6 +74,7 @@ describe("nav rail fold control", () => {
     );
     const button = screen.getByRole("button", { name: "收起导航栏" });
     const row = container.querySelector(`.${styles.brandRow}`);
+    expect(screen.queryByText("v1.0.3b7")).not.toBeInTheDocument();
     expect(row?.lastElementChild).toBe(button);
     expect(button).toHaveAttribute("aria-expanded", "true");
     expect(button.querySelector("svg")?.getAttribute("class")).toContain(
@@ -120,7 +120,7 @@ describe("nav rail fold control", () => {
 
 describe("对话行上的会话开关", () => {
   beforeEach(() => {
-    localStorage.removeItem(LAYOUT_MODE_KEY);
+    localStorage.setItem(LAYOUT_MODE_KEY, "classic");
     localStorage.setItem("octop:chat-sidebar:open", "false");
   });
 

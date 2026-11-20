@@ -921,6 +921,13 @@ def test_build_harness_config_includes_cronjob_tools_when_cron_manager_set(
         "cronjob_delete",
         "cronjob_run_now",
         "search_knowledge",
+        "list_knowledge_bases",
+        "list_knowledge_documents",
+        "create_knowledge_base",
+        "update_knowledge_base",
+        "create_knowledge_document",
+        "upload_knowledge_document",
+        "update_knowledge_document",
     }
 
 
@@ -931,7 +938,16 @@ def test_build_harness_config_includes_search_knowledge_without_cron(
 
     cfg = manager._build_harness_config(_row(agent_id="AGT001"))
     assert cfg.tools is not None
-    assert {t.name for t in cfg.tools} == {"search_knowledge"}
+    assert {t.name for t in cfg.tools} == {
+        "search_knowledge",
+        "list_knowledge_bases",
+        "list_knowledge_documents",
+        "create_knowledge_base",
+        "update_knowledge_base",
+        "create_knowledge_document",
+        "upload_knowledge_document",
+        "update_knowledge_document",
+    }
     assert any(isinstance(item, KnowledgeSearchHintMiddleware) for item in (cfg.middleware or []))
 
 
@@ -1888,6 +1904,10 @@ def test_runtime_uses_health_aware_model_failover(manager: AgentManager) -> None
     assert len(failovers) == 1
     assert not cfg.model_retry_enabled
     assert failovers[0]._on_failure == "error"
+    assert cfg.model_retry_max_retries == 5
+    assert cfg.model_retry_max_delay == 60.0
+    failovers[0]._model_for_ref("p/a")
+    factory.get_chat_model.assert_called_once_with("p/a", max_retries=0)
 
 
 def test_auto_route_fallback_skips_model_in_cooldown(manager: AgentManager) -> None:

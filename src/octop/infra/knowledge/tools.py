@@ -75,8 +75,23 @@ class KnowledgeToolServices:
     read the same config, including after setup replaces it.
     """
 
-    def __init__(self, manager: Any) -> None:
+    def __init__(self, manager: Any, *, workspace: Any = None, agent_id: str = "") -> None:
         self._manager = manager
+        self.workspace = workspace
+        self._agent_id = agent_id
+
+    @property
+    def repos(self) -> Any:
+        return self._manager._repos
+
+    async def resolve_workspace(self) -> Any:
+        """Use the bound agent's live workspace, including remote sandboxes."""
+        if not self._agent_id:
+            return self.workspace
+        import asyncio
+
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._manager.workspace_for_agent, self._agent_id)
 
     @property
     def config(self) -> Any:
@@ -96,7 +111,8 @@ class KnowledgeToolServices:
 
 
 def build_knowledge_tools(services: Any) -> list[StructuredTool]:
-    """Return built-in knowledge retrieval tools (wired via HarnessAgentConfig.tools)."""
+    """Return knowledge retrieval and user-approved management tools."""
+    from octop.infra.knowledge.write_tools import build_knowledge_write_tools
 
     async def search_knowledge(
         query: Annotated[
@@ -143,5 +159,6 @@ def build_knowledge_tools(services: Any) -> list[StructuredTool]:
             name=SEARCH_KNOWLEDGE_TOOL,
             # Static fallback; middleware hides or rewrites this per turn.
             description=format_search_knowledge_description([]),
-        )
+        ),
+        *build_knowledge_write_tools(services),
     ]

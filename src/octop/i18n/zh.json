@@ -630,6 +630,10 @@
     },
     "preflight_failed_summary": "一项或多项预检未通过"
   },
+  "knowledge_tools": {
+    "operation_failed": "知识库操作失败，请检查权限、目标和知识库设置。",
+    "write_rejected": "用户拒绝了本次知识库写入，未做任何修改。"
+  },
   "tools": {
     "unknown": "未知工具",
     "read_file": "读取文件",
@@ -663,6 +667,13 @@
     "cronjob_delete": "删除定时任务",
     "cronjob_run_now": "立即执行定时任务",
     "search_knowledge": "检索知识库",
+    "list_knowledge_bases": "列出知识库",
+    "list_knowledge_documents": "列出知识库文档",
+    "create_knowledge_base": "新建知识库",
+    "update_knowledge_base": "更新知识库",
+    "create_knowledge_document": "新增知识库文档",
+    "upload_knowledge_document": "上传知识库文档",
+    "update_knowledge_document": "更新知识库文档",
     "agent_list": "列出专家",
     "ask_agent": "咨询专家",
     "call_agent": "调用专家",

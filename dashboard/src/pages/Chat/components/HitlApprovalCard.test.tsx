@@ -2,6 +2,10 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import HitlApprovalCard from "./HitlApprovalCard";
 
+vi.mock("../hooks/toolDisplayNames", () => ({
+  useToolDisplayNames: () => (name?: string) => name ?? "unknown",
+}));
+
 describe("HitlApprovalCard", () => {
   it("does not dump raw JSON arguments", () => {
     render(
@@ -57,6 +61,37 @@ describe("HitlApprovalCard", () => {
     expect(onDecision).toHaveBeenCalledWith([
       { type: "reject", message: "Rejected by user" },
     ]);
+  });
+
+  it.each([
+    "create_knowledge_base",
+    "update_knowledge_base",
+    "create_knowledge_document",
+    "upload_knowledge_document",
+    "update_knowledge_document",
+  ])("offers only one-time decisions for %s", (name) => {
+    const onDecision = vi.fn();
+    render(
+      <HitlApprovalCard
+        actions={[{ name, args: {} }]}
+        status="pending"
+        onDecision={onDecision}
+        pendingId="knowledge-pending"
+      />,
+    );
+    expect(screen.getAllByRole("button")).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    expect(onDecision).toHaveBeenCalledWith(
+      [{ type: "approve" }],
+      undefined,
+      "knowledge-pending",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Reject" }));
+    expect(onDecision).toHaveBeenCalledWith(
+      [{ type: "reject", message: "Rejected by user" }],
+      undefined,
+      "knowledge-pending",
+    );
   });
 
   it("uses plural allow copy when several tools are waiting", async () => {

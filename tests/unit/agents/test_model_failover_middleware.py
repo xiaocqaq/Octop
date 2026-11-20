@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from langchain.agents.middleware import ModelRequest, ModelResponse
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 
 from octop.infra.agents.middleware import model_failover
@@ -447,3 +449,142 @@ async def test_cooled_down_model_is_tried_again(monkeypatch) -> None:
     )
     assert second.result[0].content == "back"
     assert health.is_routable("Magpie/a")
+
+
+@pytest.mark.asyncio
+async def test_current_chat_model_uses_retry_isolated_factory_instance(monkeypatch) -> None:
+    original = _model("p/a", 32_000)
+    isolated = _model("p/a", 100_000)
+    factory = MagicMock(return_value=isolated)
+    middleware = SafeModelFailoverMiddleware(
+        health=ModelHealthRegistry(),
+        candidates=lambda _current, _vision: [],
+        model_for_ref=factory,
+        max_retries=0,
+        initial_delay=0,
+        max_delay=0,
+        on_failure="error",
+    )
+    monkeypatch.setattr(model_failover, "_configurable", lambda _request: {"model": "p/a"})
+    response = ModelResponse(result=[AIMessage(content="ok")])
+    handler = AsyncMock(return_value=response)
+    request = ModelRequest(
+        model=original,
+        messages=[HumanMessage(content="hello")],
+        model_settings={"temperature": 0.3},
+    )
+
+    assert await middleware.awrap_model_call(request, handler) is response
+    factory.assert_called_once_with("p/a")
+    assert handler.call_args.args[0].model is isolated
+    assert handler.call_args.args[0].model_settings == {"temperature": 0.3}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("asynchronous", [False, True])
+async def test_exponential_retry_delays_never_exceed_configured_maximum(
+    monkeypatch, asynchronous: bool
+) -> None:
+    import langchain.agents.middleware._retry as retry_utils
+    import langchain.agents.middleware.model_retry as retry_impl
+
+    model = _model("p/a", 100_000)
+    middleware = SafeModelFailoverMiddleware(
+        health=ModelHealthRegistry(),
+        candidates=lambda _current, _vision: [],
+        model_for_ref=lambda _ref: model,
+        max_retries=5,
+        initial_delay=1,
+        max_delay=4,
+        on_failure="error",
+    )
+    monkeypatch.setattr(model_failover, "_configurable", lambda _request: {"model": "p/a"})
+    monkeypatch.setattr(retry_utils.random, "uniform", lambda _low, high: high)
+    delays: list[float] = []
+    monkeypatch.setattr(retry_impl.time, "sleep", delays.append)
+
+    async def sleep(delay: float) -> None:
+        delays.append(delay)
+
+    monkeypatch.setattr(retry_impl.asyncio, "sleep", sleep)
+    error = RuntimeError("HTTP 503 service unavailable")
+    handler = AsyncMock(side_effect=error) if asynchronous else MagicMock(side_effect=error)
+    request = ModelRequest(model=model, messages=[HumanMessage(content="hello")])
+    with pytest.raises(RuntimeError):
+        if asynchronous:
+            await middleware.awrap_model_call(request, handler)
+        else:
+            middleware.wrap_model_call(request, handler)
+
+    assert handler.call_count == 6
+    assert delays == [1, 2, 4, 4, 4]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancel_during_sleep", [False, True])
+async def test_cancellation_never_retries_or_fails_over(
+    monkeypatch, cancel_during_sleep: bool
+) -> None:
+    import langchain.agents.middleware.model_retry as retry_impl
+
+    models = {"p/a": _model("p/a", 100_000), "p/b": _model("p/b", 100_000)}
+    health = ModelHealthRegistry()
+    middleware = SafeModelFailoverMiddleware(
+        health=health,
+        candidates=lambda _current, _vision: [AutoRouteCandidate("p/b", 100_000)],
+        model_for_ref=models.__getitem__,
+        max_retries=5,
+        initial_delay=1,
+        max_delay=60,
+        on_failure="error",
+    )
+    monkeypatch.setattr(
+        model_failover,
+        "_configurable",
+        lambda _request: {"model": "p/a", "octop_auto_route": True},
+    )
+    sleep = AsyncMock(side_effect=asyncio.CancelledError)
+    monkeypatch.setattr(retry_impl.asyncio, "sleep", sleep)
+    error = (
+        RuntimeError("HTTP 503 service unavailable")
+        if cancel_during_sleep
+        else asyncio.CancelledError()
+    )
+    handler = AsyncMock(side_effect=error)
+    request = ModelRequest(model=models["p/a"], messages=[HumanMessage(content="hello")])
+
+    with pytest.raises(asyncio.CancelledError):
+        await middleware.awrap_model_call(request, handler)
+
+    assert handler.await_count == 1
+    assert sleep.await_count == int(cancel_during_sleep)
+    assert health.is_routable("p/a")
+    assert health.is_routable("p/b")
+
+
+@pytest.mark.asyncio
+async def test_retry_isolated_model_preserves_profile_without_mutating_factory_cache(
+    monkeypatch,
+) -> None:
+    original = _model("p/a", 32_000)
+    isolated = FakeListChatModel(responses=["unused"], profile={"max_input_tokens": 100_000})
+    middleware = SafeModelFailoverMiddleware(
+        health=ModelHealthRegistry(),
+        candidates=lambda _current, _vision: [],
+        model_for_ref=lambda _ref: isolated,
+        max_retries=0,
+        initial_delay=0,
+        max_delay=0,
+        on_failure="error",
+    )
+    monkeypatch.setattr(model_failover, "_configurable", lambda _request: {"model": "p/a"})
+    response = ModelResponse(result=[AIMessage(content="ok")])
+    handler = AsyncMock(return_value=response)
+    request = ModelRequest(model=original, messages=[HumanMessage(content="hello")])
+
+    assert await middleware.awrap_model_call(request, handler) is response
+
+    invoked_model = handler.call_args.args[0].model
+    assert invoked_model is not isolated
+    assert invoked_model.profile == {"max_input_tokens": 32_000}
+    assert isolated.profile == {"max_input_tokens": 100_000}

@@ -137,3 +137,33 @@ def test_status_only_model_does_not_emit_fake_controls() -> None:
     assert capability is not None
     assert capability["efforts"] == []
     assert reasoning_request_parameters(capability, mode="disabled", effort="high") == {}
+
+
+def test_supported_reasoning_defaults_to_enabled_for_every_adapter() -> None:
+    for adapter in (
+        "thinking",
+        "thinking_nested_effort",
+        "dashscope",
+        "openrouter",
+        "anthropic_adaptive",
+        "anthropic_budget",
+        "openai_reasoning_effort",
+    ):
+        capability = reasoning_capability(
+            {
+                "id": "reasoner",
+                "reasoning_config": {
+                    "adapter": adapter,
+                    "default_mode": "auto",
+                    "efforts": ["low", "medium", "high"],
+                },
+            }
+        )
+        assert capability is not None
+        assert capability["default_mode"] == "enabled"
+        assert reasoning_request_parameters(capability, mode=None, effort=None)
+
+
+def test_non_reasoning_model_does_not_receive_reasoning_parameters() -> None:
+    assert reasoning_capability({"id": "ordinary-chat"}) is None
+    assert reasoning_request_parameters(None, mode="enabled", effort=None) == {}

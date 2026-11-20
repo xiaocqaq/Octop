@@ -98,6 +98,28 @@ def test_call_guard_defaults_cap_repeated_tool_calls_and_retry_tool_exceptions()
     assert tool_retry.on_failure == "continue"
 
 
+def test_model_retry_defaults_are_five_retries_and_sixty_seconds() -> None:
+    budget = resolve_model_retry({})
+    assert budget.max_retries == 5
+    assert budget.initial_delay == 1.0
+    assert budget.max_delay == 60.0
+
+
+def test_model_retry_keeps_valid_manual_overrides() -> None:
+    budget = resolve_model_retry(
+        {
+            "model_retry_enabled": False,
+            "model_retry_max_retries": 7,
+            "model_retry_initial_delay": 2.5,
+            "model_retry_max_delay": 120,
+        }
+    )
+    assert budget.enabled is False
+    assert budget.max_retries == 7
+    assert budget.initial_delay == 2.5
+    assert budget.max_delay == 120.0
+
+
 def test_call_guard_honors_overrides_and_can_be_disabled() -> None:
     cfg = {
         "tool_call_run_limit": 12,

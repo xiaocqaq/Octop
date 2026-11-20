@@ -9,6 +9,7 @@ from typing import Any
 from octop_harness.security.models import SecurityPolicy
 
 from octop.infra.db.repos.settings import SettingsRepo
+from octop.infra.knowledge.approval import KNOWLEDGE_WRITE_TOOL_NAMES
 
 logger = logging.getLogger(__name__)
 
@@ -56,10 +57,11 @@ class SecuritySettingsStore:
 def tool_execution_may_pause(policy: SecurityPolicy) -> bool:
     """True when a tool call can pause for human approval.
 
-    Covers the admin HITL switch and command-guard ``require_approval``.
+    Knowledge writes require confirmation independently of the admin HITL switch
+    and command-guard ``require_approval``. Keep approval controls available for them.
     ``ask_user_question`` is a separate collaboration pause and is ignored here.
     """
-    if policy.hitl.enabled:
+    if KNOWLEDGE_WRITE_TOOL_NAMES or policy.hitl.enabled:
         return True
     guard = policy.tool_guard
     return bool(guard.enabled and guard.mode == "require_approval")

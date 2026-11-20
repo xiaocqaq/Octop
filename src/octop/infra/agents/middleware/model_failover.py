@@ -7,10 +7,10 @@ from collections.abc import Awaitable, Callable, Sequence
 from typing import Any, Literal, cast
 
 from langchain.agents.middleware import AgentMiddleware, ModelRequest, ModelResponse
-from langchain.agents.middleware.model_retry import ModelRetryMiddleware
 from langchain_core.messages import AIMessage
 from langgraph.errors import GraphBubbleUp
 from octop_harness.context_usage import breakdown_from_model_request
+from octop_harness.middleware.model_retry import ModelRetryMiddleware
 from octop_harness.middleware.runtime import runtime_config
 from octop_harness.middleware.turn_model import latest_human_needs_multimodal
 
@@ -75,6 +75,7 @@ class SafeModelFailoverMiddleware(AgentMiddleware[Any, Any]):
             max_retries=max_retries,
             initial_delay=initial_delay,
             max_delay=max_delay,
+            jitter=False,  # LangChain adds jitter after its cap and can exceed max_delay.
             on_failure="error",
         )
 
@@ -109,6 +110,18 @@ class SafeModelFailoverMiddleware(AgentMiddleware[Any, Any]):
             and _fits_context(candidate, estimated, route_cap)
         ]
 
+    def _initial_model(self, request: ModelRequest[Any], ref: str) -> Any:
+        if not ref:
+            return request.model
+        # The host factory supplies a separate SDK-zero-retry instance. Keep
+        # the context cap already applied by ModelSettingsMiddleware.
+        model = self._model_for_ref(ref)
+        profile = getattr(request.model, "profile", None)
+        model_copy = getattr(model, "model_copy", None)
+        if model is not request.model and isinstance(profile, dict) and callable(model_copy):
+            return model_copy(update={"profile": dict(profile)})
+        return model
+
     def _record_failure(self, ref: str, exc: Exception) -> bool:
         decision = classify_model_failure(exc)
         if decision.scope is not FailureScope.NONE:
@@ -124,7 +137,7 @@ class SafeModelFailoverMiddleware(AgentMiddleware[Any, Any]):
         last_error: Exception | None = None
         attempts: list[tuple[str, Any]] = []
         if not automatic or not current_ref or self._health.begin_attempt(current_ref):
-            attempts.append((current_ref, request.model))
+            attempts.append((current_ref, self._initial_model(request, current_ref)))
         if automatic and current_ref:
             attempts.extend(
                 (candidate.ref, self._model_for_ref(candidate.ref))
@@ -164,7 +177,7 @@ class SafeModelFailoverMiddleware(AgentMiddleware[Any, Any]):
         last_error: Exception | None = None
         attempts: list[tuple[str, Any]] = []
         if not automatic or not current_ref or self._health.begin_attempt(current_ref):
-            attempts.append((current_ref, request.model))
+            attempts.append((current_ref, self._initial_model(request, current_ref)))
         if automatic and current_ref:
             attempts.extend(
                 (candidate.ref, self._model_for_ref(candidate.ref))

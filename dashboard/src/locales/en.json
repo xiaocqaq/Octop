@@ -1841,6 +1841,12 @@
         "removeTool": "Stop allowing {{tool}}"
       },
       "args": {
+        "kb_id": "Knowledge base",
+        "doc_id": "Document",
+        "workspace_path": "Workspace source file",
+        "name": "Name",
+        "description": "Description",
+        "format": "Format",
         "action": "Action",
         "level": "Detail",
         "url": "URL",
@@ -2076,6 +2082,13 @@
     "cronjob_delete": "Delete cron job",
     "cronjob_run_now": "Run cron job now",
     "search_knowledge": "Search knowledge base",
+    "list_knowledge_bases": "List knowledge bases",
+    "list_knowledge_documents": "List knowledge documents",
+    "create_knowledge_base": "Create knowledge base",
+    "update_knowledge_base": "Update knowledge base",
+    "create_knowledge_document": "Create knowledge document",
+    "upload_knowledge_document": "Upload knowledge document",
+    "update_knowledge_document": "Update knowledge document",
     "agent_list": "List experts",
     "ask_agent": "Ask expert",
     "call_agent": "Call expert",
@@ -4261,8 +4274,8 @@
       "enabled": "Retry model requests",
       "enabledTooltip": "Retry a model request that raises an error. When the budget is used up, the turn fails instead of inventing a reply. Saving reloads this expert.",
       "maxRetries": "Model retries",
-      "maxRetriesTooltip": "Extra attempts after the first model request fails. Empty uses 2. Use 0 to disable retries while leaving the switch on.",
-      "maxRetriesPlaceholder": "2",
+      "maxRetriesTooltip": "Extra attempts after the first model request fails. Empty uses 5. Use 0 to disable retries while leaving the switch on.",
+      "maxRetriesPlaceholder": "5",
       "initialDelay": "Model retry initial delay (seconds)",
       "initialDelayTooltip": "Seconds to wait before the first retry. Later waits double, up to the maximum delay. Empty uses 1.",
       "initialDelayPlaceholder": "1",
@@ -4436,7 +4449,9 @@
     "tooMany": "Only the first {{max}} files can be uploaded at once",
     "unsupportedType": "Unsupported file type: {{type}}",
     "tooLarge": "File too large (max {{maxMb}}MB): {{name}}",
-    "failed": "Upload failed"
+    "failed": "Upload failed",
+    "progress": "Uploading… {{percent}}%",
+    "finishing": "Finishing upload…"
   },
   "mention": {
     "empty": "No matches",

@@ -63,6 +63,18 @@ function cacheKey(url: string, filename?: string): string {
   return filename ? `${url}\0${filename}` : url;
 }
 
+/** Reuse the original bytes of a freshly uploaded image at its server URL. */
+export function primeAuthImageSrc(
+  url: string,
+  filename: string,
+  image: Blob,
+): void {
+  const key = cacheKey(url, filename);
+  if (authImageCache.has(key)) return;
+  authImageCache.set(key, { refs: 0, objectUrl: URL.createObjectURL(image) });
+  evictIdleAuthImages();
+}
+
 export function acquireAuthImageSrc(
   url: string,
   filename?: string,

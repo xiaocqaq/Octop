@@ -1,5 +1,12 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (key: string, _options?: unknown) => key,
+    i18n: { exists: () => false },
+  }),
+}));
+
 import HitlPolicyPicker from "./HitlPolicyPicker";
 
 describe("HitlPolicyPicker", () => {

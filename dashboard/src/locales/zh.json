@@ -1841,6 +1841,12 @@
         "removeTool": "取消放通 {{tool}}"
       },
       "args": {
+        "kb_id": "知识库",
+        "doc_id": "文档",
+        "workspace_path": "工作区源文件",
+        "name": "名称",
+        "description": "说明",
+        "format": "格式",
         "action": "操作",
         "level": "范围",
         "url": "网址",
@@ -2076,6 +2082,13 @@
     "cronjob_delete": "删除定时任务",
     "cronjob_run_now": "立即执行定时任务",
     "search_knowledge": "检索知识库",
+    "list_knowledge_bases": "列出知识库",
+    "list_knowledge_documents": "列出知识库文档",
+    "create_knowledge_base": "新建知识库",
+    "update_knowledge_base": "更新知识库",
+    "create_knowledge_document": "新增知识库文档",
+    "upload_knowledge_document": "上传知识库文档",
+    "update_knowledge_document": "更新知识库文档",
     "agent_list": "列出专家",
     "ask_agent": "咨询专家",
     "call_agent": "调用专家",
@@ -4261,8 +4274,8 @@
       "enabled": "重试模型请求",
       "enabledTooltip": "模型请求抛出异常时按间隔重试。次数用尽后本轮失败，不生成替代回复。保存后重新加载该专家。",
       "maxRetries": "模型重试次数",
-      "maxRetriesTooltip": "首次请求失败之后再试几次。留空为 2。填 0 表示不再重试。",
-      "maxRetriesPlaceholder": "2",
+      "maxRetriesTooltip": "首次请求失败之后再试几次。留空为 5。填 0 表示不再重试。",
+      "maxRetriesPlaceholder": "5",
       "initialDelay": "模型重试初始间隔（秒）",
       "initialDelayTooltip": "第一次重试前等待的秒数，之后按 2 倍增加，直到最大间隔。留空为 1。",
       "initialDelayPlaceholder": "1",
@@ -4436,7 +4449,9 @@
     "tooMany": "一次最多上传 {{max}} 个文件，其余已跳过",
     "unsupportedType": "不支持的文件类型：{{type}}",
     "tooLarge": "文件过大（最大 {{maxMb}}MB）：{{name}}",
-    "failed": "上传失败"
+    "failed": "上传失败",
+    "progress": "上传中… {{percent}}%",
+    "finishing": "等待服务器确认…"
   },
   "mention": {
     "empty": "没有匹配项",

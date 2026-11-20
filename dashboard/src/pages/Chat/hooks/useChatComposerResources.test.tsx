@@ -461,6 +461,125 @@ describe("useChatComposerResources — expert default model", () => {
   });
 });
 
+describe("useChatComposerResources — reasoning defaults", () => {
+  it("starts Auto with reasoning enabled before and after loading resources", async () => {
+    const renderedModes: string[] = [];
+    const { result } = renderHook(() => {
+      const resources = useChatComposerResources("expertA", null);
+      renderedModes.push(resources.reasoningMode);
+      return resources;
+    });
+
+    expect(renderedModes[0]).toBe("enabled");
+    await waitFor(() => expect(result.current.modelsReady).toBe(true));
+    expect(result.current.selectedModel).toBeNull();
+    expect(result.current.reasoningMode).toBe("enabled");
+    expect(result.current.reasoningEffort).toBeNull();
+  });
+
+  it("switches back to Auto with reasoning enabled and persists that mode", async () => {
+    const { result } = renderHook(() =>
+      useChatComposerResources(
+        "expertA",
+        "thread-existing",
+        "prov/sticky",
+        "disabled",
+      ),
+    );
+    await waitFor(() => expect(result.current.modelsReady).toBe(true));
+    expect(result.current.reasoningMode).toBe("disabled");
+
+    act(() => result.current.setSelectedModel(null));
+
+    expect(result.current.selectedModel).toBeNull();
+    expect(result.current.reasoningMode).toBe("enabled");
+    expect(octopThreadsApi.patch).toHaveBeenCalledWith(
+      "expertA",
+      "thread-existing",
+      { model_ref: null, reasoning_mode: "enabled", reasoning_effort: null },
+    );
+  });
+
+  it("enables reasoning when choosing a model without a configured default", async () => {
+    const { result } = renderHook(() =>
+      useChatComposerResources("expertA", null),
+    );
+    await waitFor(() => expect(result.current.modelsReady).toBe(true));
+
+    act(() => result.current.setSelectedModel("prov/sticky"));
+
+    expect(result.current.reasoningMode).toBe("enabled");
+  });
+
+  it.each(["disabled", "auto"] as const)(
+    "preserves an explicit sticky %s mode on Auto",
+    async (mode) => {
+      const { result } = renderHook(() =>
+        useChatComposerResources("expertA", "thread-existing", null, mode),
+      );
+
+      await waitFor(() => expect(result.current.modelsReady).toBe(true));
+      expect(result.current.selectedModel).toBeNull();
+      expect(result.current.reasoningMode).toBe(mode);
+      expect(octopThreadsApi.patch).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["disabled", "auto"] as const)(
+    "preserves the account's explicit %s model default",
+    async (mode) => {
+      vi.mocked(preferencesApi.get).mockResolvedValue({
+        locale: "zh",
+        remote_browser_bookmarks: [],
+        preferred_model: "prov/preferred",
+        model_reasoning: { "prov/sticky": { mode, effort: "low" } },
+      });
+      const { result } = renderHook(() =>
+        useChatComposerResources("expertA", null),
+      );
+      await waitFor(() =>
+        expect(result.current.preferredModel).toBe("prov/preferred"),
+      );
+
+      act(() => result.current.setSelectedModel("prov/sticky"));
+
+      expect(result.current.reasoningMode).toBe(mode);
+      expect(result.current.reasoningEffort).toBe("low");
+    },
+  );
+
+  it.each(["disabled", "auto"] as const)(
+    "preserves a model capability's explicit %s default",
+    async (mode) => {
+      vi.mocked(providerApi.listResolvedModels).mockResolvedValue([
+        {
+          ...model("sticky"),
+          reasoning_config: {
+            supported: true,
+            toggle: true,
+            default_mode: mode,
+            efforts: ["low", "medium"],
+            default_effort: "low",
+            effort_type: "enum",
+            adapter: "thinking",
+          },
+        },
+      ]);
+      const { result } = renderHook(() =>
+        useChatComposerResources("expertA", "thread-existing", "prov/sticky"),
+      );
+      await waitFor(() => expect(result.current.modelsReady).toBe(true));
+      expect(result.current.reasoningMode).toBe(mode);
+      expect(result.current.reasoningEffort).toBe("low");
+
+      act(() => result.current.setSelectedModel("prov/sticky"));
+
+      expect(result.current.reasoningMode).toBe(mode);
+      expect(result.current.reasoningEffort).toBe("low");
+    },
+  );
+});
+
 describe("useChatComposerResources — peer expert defaults", () => {
   it("shows the peer expert's model, connectors, knowledge bases, and mode", async () => {
     agentState.agents = [
@@ -593,7 +712,7 @@ describe("useChatComposerResources — disabled model recovery (#2316)", () => {
     expect(octopThreadsApi.patch).toHaveBeenCalledWith(
       "expertA",
       "thread-existing",
-      { model_ref: null, reasoning_mode: "auto", reasoning_effort: null },
+      { model_ref: null, reasoning_mode: "enabled", reasoning_effort: null },
     );
   });
 

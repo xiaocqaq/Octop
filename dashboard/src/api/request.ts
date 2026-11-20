@@ -624,7 +624,7 @@ export type UploadProgressHandler = (percent: number) => void;
 export async function requestUpload<T = unknown>(
   path: string,
   body: FormData,
-  options: RequestInit = {},
+  options: RequestInit & { timeoutMs?: number } = {},
   onProgress?: UploadProgressHandler,
 ): Promise<T> {
   assertNotSetupLocked(path);
@@ -636,6 +636,7 @@ export async function requestUpload<T = unknown>(
   return new Promise<T>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open(method, url);
+    if (options.timeoutMs != null) xhr.timeout = options.timeoutMs;
 
     for (const [key, value] of Object.entries(headers)) {
       xhr.setRequestHeader(key, value);
@@ -660,18 +661,14 @@ export async function requestUpload<T = unknown>(
       };
     }
 
+    const abort = () => xhr.abort();
+    xhr.onloadend = () => options.signal?.removeEventListener("abort", abort);
     if (options.signal) {
       if (options.signal.aborted) {
         reject(new DOMException("The operation was aborted.", "AbortError"));
         return;
       }
-      options.signal.addEventListener(
-        "abort",
-        () => {
-          xhr.abort();
-        },
-        { once: true },
-      );
+      options.signal.addEventListener("abort", abort, { once: true });
     }
 
     xhr.onload = () => {
@@ -722,6 +719,8 @@ export async function requestUpload<T = unknown>(
       })();
     };
 
+    xhr.ontimeout = () =>
+      reject(new DOMException("Upload timed out.", "TimeoutError"));
     xhr.onerror = () => reject(new Error("Network error"));
     xhr.onabort = () =>
       reject(new DOMException("The operation was aborted.", "AbortError"));

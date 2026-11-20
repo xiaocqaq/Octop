@@ -54,6 +54,21 @@ def test_tool_services_follow_control_plane_driver() -> None:
     assert postgres_database(services) is manager._config.database
 
 
+@pytest.mark.asyncio
+async def test_tool_services_use_bound_agent_workspace_and_repos() -> None:
+    workspace = object()
+    live_workspace = object()
+    repos = SimpleNamespace()
+    manager = SimpleNamespace(
+        _repos=repos,
+        workspace_for_agent=MagicMock(return_value=live_workspace),
+    )
+    services = KnowledgeToolServices(manager, workspace=workspace, agent_id="agent-1")
+    assert services.repos is repos
+    assert await services.resolve_workspace() is live_workspace
+    manager.workspace_for_agent.assert_called_once_with("agent-1")
+
+
 def test_search_knowledge_default_description_is_empty_catalog_fallback() -> None:
     tool = _tool_by_name(build_knowledge_tools(SimpleNamespace()), "search_knowledge")
     assert tool.description == "No knowledge bases are attached this turn."

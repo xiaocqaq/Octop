@@ -7,6 +7,7 @@
  * any in-flight streaming content) are still available.
  */
 
+import i18n from "i18next";
 import { getApiUrl } from "../../../api/config";
 import { getAuthToken } from "../../../api/request";
 import type { TokenUsage } from "../../../api/types";
@@ -2830,6 +2831,7 @@ function appendErrorBubble(
   message: string,
   errorCode?: string,
   details?: Record<string, unknown>,
+  turnId = state.activeTurnId,
 ): void {
   state.messages = [
     ...state.messages,
@@ -2842,6 +2844,7 @@ function appendErrorBubble(
         source: "frontend_stream",
         ...(details ? { details } : {}),
       },
+      ...(turnId ? { turnId } : {}),
       status: "error",
       timestamp: Date.now(),
     },
@@ -4163,6 +4166,21 @@ function applySteerProtocolFrame(
       // Steers stay parked across the approval pause. Keep the turn id
       // so a committed row can still be withdrawn.
       return true;
+    }
+    const turnId = String(data.turn_id || state.activeTurnId || "").trim();
+    if (
+      data.failed === true &&
+      !state.messages.some(
+        (message) => message.status === "error" && message.turnId === turnId,
+      )
+    ) {
+      appendErrorBubble(
+        state,
+        i18n.t("chat.errorOccurred"),
+        undefined,
+        undefined,
+        turnId,
+      );
     }
     state.activeTurnId = null;
     if (!state.isTeamRoom) state.activeTurnUserId = null;

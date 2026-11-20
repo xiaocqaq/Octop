@@ -104,9 +104,9 @@ def reasoning_capability(
 
     if raw.get("supported", True) is not True:
         return None
-    mode = str(raw.get("default_mode") or "auto").strip().lower()
-    if mode not in REASONING_MODES:
-        mode = "auto"
+    # Reasoning-capable models start enabled; explicit per-turn/user choices
+    # are still resolved separately by _selected_reasoning.
+    mode = "enabled"
     efforts = list(dict.fromkeys(_string_list(raw.get("efforts"))))
     default_effort = str(raw.get("default_effort") or "").strip().lower() or None
     if default_effort not in efforts:
@@ -179,6 +179,14 @@ def reasoning_request_parameters(
             model_fields["reasoning_effort"] = "none"
         elif selected_effort:
             model_fields["reasoning_effort"] = selected_effort
+        elif selected_mode == "enabled":
+            efforts = _string_list(capability.get("efforts"))
+            positive = [value for value in efforts if value not in {"none", "minimal"}]
+            model_fields["reasoning_effort"] = (
+                ("medium" if "medium" in positive or not efforts else positive[0])
+                if positive or not efforts
+                else efforts[0]
+            )
     elif adapter == "anthropic_adaptive":
         if selected_mode == "enabled" or (selected_mode == "auto" and selected_effort):
             model_fields["thinking"] = {"type": "adaptive"}

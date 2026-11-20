@@ -172,6 +172,39 @@ describe("pendingHitl", () => {
     ).toBeNull();
   });
 
+  it.each([
+    "create_knowledge_base",
+    "update_knowledge_base",
+    "create_knowledge_document",
+    "upload_knowledge_document",
+    "update_knowledge_document",
+  ])("never auto-resumes knowledge write %s", (name) => {
+    const messages = [
+      msg({
+        id: "knowledge",
+        role: "assistant",
+        hitlData: {
+          action_requests: [
+            { name: "execute", args: {} },
+            { name, args: { content: "draft" } },
+          ],
+          status: "pending",
+          pending_id: "knowledge-pending",
+        },
+      }),
+    ];
+    expect(
+      findAutoResumableApproval({ mode: "allow_all" }, messages),
+    ).toBeNull();
+    expect(
+      findAutoResumableApproval(
+        { mode: "allow_tools", tools: ["execute", name] },
+        messages,
+      ),
+    ).toBeNull();
+    expect(findPendingApproval(messages)?.pendingId).toBe("knowledge-pending");
+  });
+
   it("ignores ask pauses without parseable questions", () => {
     expect(
       findPendingAsk([

@@ -55,6 +55,18 @@ def test_context_length_failure_allows_failover_without_quarantine() -> None:
     assert decision.kind == "context_length"
 
 
+def test_invalid_model_response_triggers_model_failover() -> None:
+    for message in (
+        "Model response ended with an error",
+        "Model returned no usable response",
+    ):
+        decision = classify_model_failure(RuntimeError(message))
+
+        assert decision.failover
+        assert decision.scope is FailureScope.MODEL
+        assert decision.kind == "invalid_response"
+
+
 def test_non_health_failure_releases_half_open_probe() -> None:
     now = 100.0
     health = ModelHealthRegistry(clock=lambda: now)

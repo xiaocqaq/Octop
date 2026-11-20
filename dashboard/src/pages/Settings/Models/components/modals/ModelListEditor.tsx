@@ -347,7 +347,7 @@ export function ModelListEditor({
         toggle: values.reasoning_toggle !== false,
         default_mode:
           (values.reasoning_default_mode as "auto" | "enabled" | "disabled") ||
-          "auto",
+          "enabled",
         efforts,
         default_effort:
           (values.reasoning_default_effort as string | undefined) || null,
@@ -426,7 +426,7 @@ export function ModelListEditor({
       reasoning: (model as Record<string, unknown>).reasoning ?? undefined,
       reasoning_toggle: model.reasoning_config?.toggle ?? true,
       reasoning_efforts: model.reasoning_config?.efforts ?? [],
-      reasoning_default_mode: model.reasoning_config?.default_mode ?? "auto",
+      reasoning_default_mode: model.reasoning_config?.default_mode ?? "enabled",
       reasoning_default_effort:
         model.reasoning_config?.default_effort ?? undefined,
       reasoning_effort_type: model.reasoning_config?.effort_type ?? "enum",
@@ -823,7 +823,7 @@ export function ModelListEditor({
                               <Form.Item
                                 name="reasoning_default_mode"
                                 label={t("models.reasoningDefault", "默认思考")}
-                                initialValue="auto"
+                                initialValue="enabled"
                                 style={{ flex: 1, marginBottom: 10 }}
                               >
                                 <Select

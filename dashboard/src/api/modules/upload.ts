@@ -1,4 +1,4 @@
-import { requestUpload } from "../request";
+import { requestUpload, type UploadProgressHandler } from "../request";
 
 export interface UploadResponse {
   path: string;
@@ -15,10 +15,17 @@ export interface UploadResponse {
 export async function uploadFile(
   agentId: string,
   file: File,
+  onProgress?: UploadProgressHandler,
+  signal?: AbortSignal,
 ): Promise<UploadResponse> {
   const formData = new FormData();
   formData.append("file", file);
-  return requestUpload<UploadResponse>(`/agents/${agentId}/upload`, formData);
+  return requestUpload<UploadResponse>(
+    `/agents/${agentId}/upload`,
+    formData,
+    { signal, timeoutMs: 15 * 60 * 1000 },
+    onProgress,
+  );
 }
 
 export const uploadImage = uploadFile;

@@ -149,7 +149,7 @@ export function useChatComposerResources(
   >({});
   const [reasoningMode, setReasoningMode] = useState<
     "auto" | "enabled" | "disabled"
-  >("auto");
+  >("enabled");
   const [reasoningEffort, setReasoningEffort] = useState<string | null>(null);
   const [conversationMode, setConversationMode] = useState<ConversationMode>(
     DEFAULT_CONVERSATION_MODE,
@@ -217,7 +217,7 @@ export function useChatComposerResources(
         : stickyReasoningMode ||
             defaults?.mode ||
             capability?.default_mode ||
-            "auto",
+            "enabled",
     );
     setReasoningEffort(
       local
@@ -573,7 +573,7 @@ export function useChatComposerResources(
       const capability = availableModels.find(
         (item) => `${item.provider_name}/${item.model}` === model,
       )?.reasoning_config;
-      const nextMode = defaults?.mode || capability?.default_mode || "auto";
+      const nextMode = defaults?.mode || capability?.default_mode || "enabled";
       const nextEffort = defaults?.effort || capability?.default_effort || null;
       setReasoningMode(nextMode);
       setReasoningEffort(nextEffort);

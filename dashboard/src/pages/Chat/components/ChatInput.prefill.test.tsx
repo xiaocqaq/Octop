@@ -33,10 +33,13 @@ vi.mock("../../../hooks/viewport", () => ({
   needsComposerVisualViewportFix: () => false,
 }));
 
+const uploadState = vi.hoisted(() => ({ uploading: false }));
+
 vi.mock("../hooks/useChatAttachments", () => ({
   useChatAttachments: () => ({
     attachments: [],
-    uploading: false,
+    uploading: uploadState.uploading,
+    uploadProgress: uploadState.uploading ? 50 : null,
     dragOver: false,
     fileInputRef: { current: null },
     folderInputRef: { current: null },
@@ -56,6 +59,7 @@ vi.mock("../hooks/useChatAttachments", () => ({
 
 vi.mock("../hooks/chatStore", () => ({
   consumePendingPrefillAttachments: () => [],
+  onSteerRestore: () => () => undefined,
   readInputDraft: (agentId: string) =>
     agentId === "agent-2" ? "target expert draft" : "",
   writeInputDraft: vi.fn(),
@@ -133,10 +137,84 @@ vi.mock("../hooks/useSlashMentionInput", () => ({
 import ChatInput, { type ChatInputHandle } from "./ChatInput";
 
 beforeEach(() => {
+  uploadState.uploading = false;
   vi.clearAllMocks();
 });
 
 describe("ChatInput prefill clear-on-send", () => {
+  it("keeps empty and short drafts compact", () => {
+    render(
+      <ChatInput
+        onSend={vi.fn()}
+        onCancel={vi.fn()}
+        onNewChat={vi.fn()}
+        isStreaming={false}
+      />,
+    );
+    const textarea = screen.getByRole("textbox");
+    expect(textarea).toHaveStyle({ height: "36px" });
+    fireEvent.change(textarea, { target: { value: "短消息" } });
+    expect(textarea).toHaveStyle({ height: "36px" });
+  });
+
+  it("grows for multiline drafts, caps long content, and shrinks after clearing", () => {
+    let measuredHeight = 96;
+    const measure = vi
+      .spyOn(HTMLTextAreaElement.prototype, "scrollHeight", "get")
+      .mockImplementation(() => measuredHeight);
+    try {
+      render(
+        <ChatInput
+          onSend={vi.fn()}
+          onCancel={vi.fn()}
+          onNewChat={vi.fn()}
+          isStreaming={false}
+          initialText={"first\nsecond\nthird"}
+        />,
+      );
+      const textarea = screen.getByRole("textbox");
+      expect(textarea).toHaveStyle({ height: "96px" });
+      measuredHeight = 300;
+      fireEvent.change(textarea, { target: { value: "long\n".repeat(20) } });
+      expect(textarea).toHaveStyle({ height: "160px" });
+      measuredHeight = 30;
+      fireEvent.change(textarea, { target: { value: "" } });
+      expect(textarea).toHaveStyle({ height: "36px" });
+    } finally {
+      measure.mockRestore();
+    }
+  });
+
+  it.each([false, true])(
+    "waits for uploads before sending or queueing (streaming=%s)",
+    (isStreaming) => {
+      uploadState.uploading = true;
+      const onSend = vi.fn();
+      const onQueue = vi.fn();
+      const props = {
+        onSend,
+        onQueue,
+        onCancel: vi.fn(),
+        onNewChat: vi.fn(),
+        isStreaming,
+        initialText: "with attachment",
+        agentId: "agent-1",
+        threadId: "thread-1",
+      };
+      const { rerender } = render(<ChatInput {...props} />);
+      expect(screen.getByRole("button", { name: "send" })).toBeDisabled();
+      fireEvent.click(screen.getByRole("button", { name: "send" }));
+      expect(onSend).not.toHaveBeenCalled();
+      expect(onQueue).not.toHaveBeenCalled();
+
+      uploadState.uploading = false;
+      rerender(<ChatInput {...props} />);
+      expect(screen.getByRole("button", { name: "send" })).toBeEnabled();
+      fireEvent.click(screen.getByRole("button", { name: "send" }));
+      expect(isStreaming ? onQueue : onSend).toHaveBeenCalledOnce();
+    },
+  );
+
   it("does not restore stale initialText after send (skill-card prefill path)", async () => {
     // Mirrors welcome skill/quick-card flow:
     // 1) setPrefillText fills the composer imperatively while parent initialText

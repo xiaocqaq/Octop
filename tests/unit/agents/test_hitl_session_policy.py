@@ -193,3 +193,65 @@ def test_build_harness_config_skips_interrupt_for_allowed_thread(
         assert write_cfg["when"](None) is False
     with hitl_thread_scope("other"):
         assert write_cfg["when"](None) is True
+
+
+@pytest.mark.parametrize(
+    "tool_name",
+    [
+        "create_knowledge_base",
+        "update_knowledge_base",
+        "create_knowledge_document",
+        "upload_knowledge_document",
+        "update_knowledge_document",
+    ],
+)
+@pytest.mark.parametrize("mode", ["allow_all", "allow_tools"])
+def test_knowledge_writes_never_allow_session_bypass(tool_name: str, mode: str) -> None:
+    policy = parse_hitl_session_policy({"mode": mode, "tools": [tool_name]})
+    assert not policy.allows(tool_name)
+
+
+@pytest.mark.parametrize(
+    "tool_name",
+    [
+        "create_knowledge_base",
+        "update_knowledge_base",
+        "create_knowledge_document",
+        "upload_knowledge_document",
+        "update_knowledge_document",
+    ],
+)
+def test_knowledge_write_interrupt_is_not_wrapped(tool_name: str) -> None:
+    store = HitlSessionPolicyStore()
+    store.set("thr_1", {"mode": "allow_all"})
+    original = {"allowed_decisions": ["approve", "reject"]}
+    wrapped = apply_session_bypass({tool_name: original}, store)
+    assert wrapped is not None
+    assert wrapped[tool_name] is original
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_build_config_leaves_knowledge_approval_to_tools(
+    manager: AgentManager, enabled: bool
+) -> None:
+    from tests.unit.agents.test_agent_manager import _row, _seed_test_provider
+
+    from octop.infra.knowledge.approval import KNOWLEDGE_WRITE_TOOL_NAMES
+
+    _seed_test_provider(manager)
+    manager._security.save(
+        SecurityPolicy.from_dict(
+            {
+                "hitl": {
+                    "enabled": enabled,
+                    "tools": ["write_file", *sorted(KNOWLEDGE_WRITE_TOOL_NAMES)],
+                }
+            }
+        )
+    )
+    cfg = manager._build_harness_config(_row())
+    assert not KNOWLEDGE_WRITE_TOOL_NAMES.intersection(cfg.interrupt_on or {})
+    assert cfg.bootstrap_enabled
+    assert any(tool.name == "create_knowledge_base" for tool in cfg.tools or [])
+    if enabled:
+        assert "write_file" in (cfg.interrupt_on or {})

@@ -85,6 +85,27 @@ def test_managed_tools_stay_unavailable_until_they_can_attach() -> None:
     )
 
 
+def test_knowledge_management_tools_are_available_without_selected_bases() -> None:
+    names = {entry.name for entry in BUILTIN_TOOL_CATALOG if entry.category == "knowledge"}
+    writes = {
+        "create_knowledge_base",
+        "update_knowledge_base",
+        "create_knowledge_document",
+        "upload_knowledge_document",
+        "update_knowledge_document",
+    }
+    assert names == writes | {
+        "search_knowledge",
+        "list_knowledge_bases",
+        "list_knowledge_documents",
+    }
+    for name in writes:
+        assert builtin_tool_available(name, agent_cfg={})
+        assert name in effective_tools_disabled({"tools_disabled": [name]})
+        # ACP currently attaches retrieval only; do not advertise unsupported writes.
+        assert name not in MANAGED_BUILTIN_TOOLS
+
+
 def test_critical_tools_are_in_catalog() -> None:
     names = {e.name for e in BUILTIN_TOOL_CATALOG}
     assert names >= CRITICAL_TOOLS

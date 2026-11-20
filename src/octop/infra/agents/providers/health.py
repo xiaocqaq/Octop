@@ -55,6 +55,10 @@ _MODEL_NOT_FOUND_MARKERS = (
     "does not exist",
     "no such model",
 )
+_INVALID_RESPONSE_MARKERS = (
+    "model response ended with an error",
+    "model returned no usable response",
+)
 _TRANSPORT_TYPE_NAMES = frozenset(
     {
         "APIConnectionError",
@@ -100,6 +104,8 @@ def classify_model_failure(exc: Exception) -> FailureDecision:
     lower = detail.lower()
     if any(marker in lower for marker in _MODEL_NOT_FOUND_MARKERS):
         return FailureDecision(True, "model_not_found", FailureScope.MODEL)
+    if any(marker in lower for marker in _INVALID_RESPONSE_MARKERS):
+        return FailureDecision(True, "invalid_response", FailureScope.MODEL)
 
     classified = classify_stream_error_message(detail)
     if classified == CONTEXT_LENGTH:

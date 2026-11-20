@@ -4521,7 +4521,9 @@ class AgentManager:
 
         knowledge_tools: list[Any] = []
         if not team_host:
-            knowledge_tools = build_knowledge_tools(KnowledgeToolServices(self))
+            knowledge_tools = build_knowledge_tools(
+                KnowledgeToolServices(self, workspace=ws, agent_id=row.agent_id)
+            )
 
         mobile_tools: list[Any] = []
         if not team_host and self._config.capabilities.mobile.enabled:
@@ -4814,6 +4816,19 @@ class AgentManager:
                 disabled = set(host_tools_disabled(disabled))
             harness_cfg.tools_disabled = frozenset(disabled)
         applied = policy.apply_to_config(harness_cfg)
+        # Knowledge write tools own their approval gate, including during bootstrap.
+        # Strip an optional outer gate so one write never asks for two decisions.
+        from octop.infra.knowledge.approval import KNOWLEDGE_WRITE_TOOL_NAMES
+
+        if applied.interrupt_on and KNOWLEDGE_WRITE_TOOL_NAMES.intersection(applied.interrupt_on):
+            applied = replace(
+                applied,
+                interrupt_on={
+                    name: config
+                    for name, config in applied.interrupt_on.items()
+                    if name not in KNOWLEDGE_WRITE_TOOL_NAMES
+                },
+            )
         applied = self._apply_team_host_config(applied, row)
         applied = self._merge_agently_write_interrupts(
             applied, self._connector_uid_for(row) if not team_host else None
@@ -4839,7 +4854,7 @@ class AgentManager:
                         candidates=lambda _current_ref, needs_multimodal: (
                             self._auto_route_candidates(needs_multimodal=needs_multimodal)
                         ),
-                        model_for_ref=get_chat_model,
+                        model_for_ref=lambda ref: get_chat_model(ref, max_retries=0),
                         max_retries=model_retry.max_retries,
                         initial_delay=model_retry.initial_delay,
                         max_delay=model_retry.max_delay,
@@ -4847,13 +4862,14 @@ class AgentManager:
                     )
                 )
             else:
-                from langchain.agents.middleware import ModelRetryMiddleware
+                from octop_harness.middleware.model_retry import ModelRetryMiddleware
 
                 prefix.append(
                     ModelRetryMiddleware(
                         max_retries=model_retry.max_retries,
                         initial_delay=model_retry.initial_delay,
                         max_delay=model_retry.max_delay,
+                        jitter=False,
                         on_failure="error",
                     )
                 )
@@ -4861,6 +4877,9 @@ class AgentManager:
         applied = replace(
             applied,
             model_retry_enabled=False,
+            model_retry_max_retries=model_retry.max_retries,
+            model_retry_initial_delay=model_retry.initial_delay,
+            model_retry_max_delay=model_retry.max_delay,
             middleware=[*prefix, *(applied.middleware or [])],
         )
         self._tool_guard_rules.ensure_seeded()

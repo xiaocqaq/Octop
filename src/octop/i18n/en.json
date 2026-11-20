@@ -630,6 +630,10 @@
     },
     "preflight_failed_summary": "One or more preflight checks failed"
   },
+  "knowledge_tools": {
+    "operation_failed": "Knowledge operation failed. Check permissions, the target, and knowledge settings.",
+    "write_rejected": "The user rejected this knowledge write. Nothing was changed."
+  },
   "tools": {
     "unknown": "Unknown tool",
     "read_file": "Read file",
@@ -663,6 +667,13 @@
     "cronjob_delete": "Delete cron job",
     "cronjob_run_now": "Run cron job now",
     "search_knowledge": "Search knowledge base",
+    "list_knowledge_bases": "List knowledge bases",
+    "list_knowledge_documents": "List knowledge documents",
+    "create_knowledge_base": "Create knowledge base",
+    "update_knowledge_base": "Update knowledge base",
+    "create_knowledge_document": "Create knowledge document",
+    "upload_knowledge_document": "Upload knowledge document",
+    "update_knowledge_document": "Update knowledge document",
     "agent_list": "List experts",
     "ask_agent": "Ask expert",
     "call_agent": "Call expert",

@@ -19,7 +19,11 @@ from octop_harness.middleware.conversation_mode import (
 
 from octop.infra.agents.workspace.dir import join_agent_facing
 
-HOST_READ_TOOLS: tuple[str, ...] = ("search_knowledge",)
+HOST_READ_TOOLS: tuple[str, ...] = (
+    "search_knowledge",
+    "list_knowledge_bases",
+    "list_knowledge_documents",
+)
 
 _EXECUTE_EXACT = frozenset(
     {

@@ -161,8 +161,9 @@ def test_write_text_privileged_falls_back_to_sudo_tee(
 
 @pytest.mark.asyncio
 async def test_probe_tencent_mirror_unreachable() -> None:
-    # 127.0.0.1:1 → connection refused → probe returns False quickly.
-    with patch.object(docker_install, "_TENCENT_MIRROR_HOST", "127.0.0.1"):
+    with patch.object(
+        docker_install.asyncio, "open_connection", side_effect=ConnectionRefusedError
+    ):
         assert await _probe_tencent_mirror() is False
 
 
@@ -303,13 +304,15 @@ def test_bundled_install_script_ships_with_package() -> None:
 
 
 @pytest.mark.asyncio
-async def test_auto_install_missing_script_reports_error() -> None:
+async def test_auto_install_missing_script_reports_error(tmp_path: Path) -> None:
     async def collect():
         return [line async for line in docker_install.auto_install_docker_stream(locale="en")]
 
-    with patch.object(docker_install, "bundled_install_script", return_value=Path("/nonexistent")):
+    with patch.object(
+        docker_install, "bundled_install_script", return_value=tmp_path / "missing-install.sh"
+    ):
         lines = await collect()
-    assert any("missing from the Octop package" in line for line in lines)
+    assert any("missing from the mxiao package" in line for line in lines)
 
 
 @pytest.mark.asyncio

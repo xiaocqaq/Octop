@@ -114,6 +114,33 @@ def test_middleware_rewrites_search_knowledge_description() -> None:
     assert request.tools[0].description == "stale"
 
 
+def test_middleware_keeps_knowledge_management_when_catalog_empty() -> None:
+    from octop.infra.knowledge.tools import build_knowledge_tools
+
+    request = ModelRequest(
+        model=MagicMock(), messages=[], tools=build_knowledge_tools(SimpleNamespace())
+    )
+    captured: list[ModelRequest] = []
+
+    def handler(req: ModelRequest) -> object:
+        captured.append(req)
+        return object()
+
+    with _configurable(knowledge_base_catalog=[]):
+        KnowledgeSearchHintMiddleware().wrap_model_call(request, handler)
+    names = {getattr(tool, "name", None) for tool in captured[0].tools}
+    assert "search_knowledge" not in names
+    assert {
+        "list_knowledge_bases",
+        "list_knowledge_documents",
+        "create_knowledge_base",
+        "update_knowledge_base",
+        "create_knowledge_document",
+        "upload_knowledge_document",
+        "update_knowledge_document",
+    } <= names
+
+
 def test_middleware_hides_tool_when_catalog_empty() -> None:
     other = StructuredTool.from_function(
         func=lambda: "x",

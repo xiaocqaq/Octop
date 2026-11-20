@@ -1,11 +1,14 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { App } from "antd";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ModelListEditor } from "./ModelListEditor";
 import type { ProviderModel, ProviderRow } from "../../useProviders";
 
-function renderEditor(models: ProviderModel[]) {
+function renderEditor(
+  models: ProviderModel[],
+  onModelsChange: (models: ProviderModel[]) => void = vi.fn(),
+) {
   const provider: ProviderRow = {
     id: 1,
     name: "mindie",
@@ -21,7 +24,7 @@ function renderEditor(models: ProviderModel[]) {
       <ModelListEditor
         provider={provider}
         models={models}
-        onModelsChange={vi.fn()}
+        onModelsChange={onModelsChange}
         canTest={false}
       />
     </App>,
@@ -29,6 +32,97 @@ function renderEditor(models: ProviderModel[]) {
 }
 
 describe("ModelListEditor", () => {
+  beforeEach(() => {
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+  });
+
+  it("defaults newly configured reasoning to enabled", async () => {
+    const onModelsChange = vi.fn();
+    renderEditor([], onModelsChange);
+
+    fireEvent.click(screen.getByText("models.addModel"));
+    fireEvent.change(screen.getByLabelText("models.modelIdLabel"), {
+      target: { value: "new-reasoner" },
+    });
+    fireEvent.click(screen.getByText("models.showAdvanced"));
+    fireEvent.click(screen.getByLabelText("models.reasoning"));
+
+    expect(screen.getByText("开启")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("models.addModel"));
+    await waitFor(() =>
+      expect(onModelsChange).toHaveBeenCalledWith([
+        expect.objectContaining({
+          id: "new-reasoner",
+          reasoning: true,
+          reasoning_config: expect.objectContaining({
+            default_mode: "enabled",
+          }),
+        }),
+      ]),
+    );
+  }, 60_000);
+
+  it("defaults existing reasoning without a configured mode to enabled", async () => {
+    const onModelsChange = vi.fn();
+    renderEditor(
+      [{ id: "legacy", name: "Legacy", reasoning: true }],
+      onModelsChange,
+    );
+
+    fireEvent.click(screen.getByLabelText("models.editModel"));
+
+    expect(screen.getByText("开启")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("models.saveEdit"));
+    await waitFor(() =>
+      expect(onModelsChange).toHaveBeenCalledWith([
+        expect.objectContaining({
+          reasoning_config: expect.objectContaining({
+            default_mode: "enabled",
+          }),
+        }),
+      ]),
+    );
+  }, 60_000);
+
+  it.each(["disabled", "auto"] as const)(
+    "preserves an existing explicit %s mode when saving",
+    async (mode) => {
+      const onModelsChange = vi.fn();
+      renderEditor(
+        [
+          {
+            id: "configured",
+            name: "Configured",
+            reasoning: true,
+            reasoning_config: {
+              supported: true,
+              toggle: true,
+              default_mode: mode,
+              efforts: [],
+              effort_type: "enum",
+              adapter: "thinking",
+            },
+          },
+        ],
+        onModelsChange,
+      );
+
+      fireEvent.click(screen.getByLabelText("models.editModel"));
+
+      expect(
+        screen.getByText(mode === "disabled" ? "关闭" : "自动"),
+      ).toBeInTheDocument();
+      fireEvent.click(screen.getByText("models.saveEdit"));
+      await waitFor(() =>
+        expect(onModelsChange).toHaveBeenCalledWith([
+          expect.objectContaining({
+            reasoning_config: expect.objectContaining({ default_mode: mode }),
+          }),
+        ]),
+      );
+    },
+    60_000,
+  );
   it("shows protocol fallback after selecting Responses", async () => {
     const user = userEvent.setup();
     HTMLElement.prototype.scrollIntoView = vi.fn();
@@ -63,7 +157,7 @@ describe("ModelListEditor", () => {
     await user.click(screen.getByRole("button", { name: "models.editModel" }));
     expect(await screen.findByDisplayValue("qwen")).toBeInTheDocument();
     expect(scrollIntoView).toHaveBeenCalled();
-    expect(screen.getByText("models.purposeChat")).toBeInTheDocument();
+    expect(screen.getByText("models.apiMode")).toBeInTheDocument();
     expect(screen.queryByText("models.reasoning")).not.toBeInTheDocument();
 
     await user.click(

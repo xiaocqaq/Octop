@@ -55,7 +55,7 @@ describe("sidebar new conversation", () => {
   beforeEach(() => {
     state.activeAgentId = "active-expert";
     state.navigate.mockReset();
-    localStorage.removeItem(LAYOUT_MODE_KEY);
+    localStorage.setItem(LAYOUT_MODE_KEY, "classic");
   });
 
   it("places the new-chat button immediately before the existing history toggle", () => {

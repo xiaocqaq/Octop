@@ -14,7 +14,7 @@ vi.mock("../components/AppVersionBadge", () => ({
 }));
 
 vi.mock("../components/CurrentVersionBadge", () => ({
-  default: () => null,
+  default: () => <span>v1.0.3b7</span>,
 }));
 
 import Header from "./Header";
@@ -23,6 +23,7 @@ describe("Header", () => {
   it("pads mobile chrome for iOS PWA safe-area inset", () => {
     render(<Header isMobile onToggle={() => undefined} />);
     const header = screen.getByRole("banner");
+    expect(screen.queryByText("v1.0.3b7")).not.toBeInTheDocument();
     expect(header.style.height).toContain("safe-area-inset-top");
     expect(header.style.padding).toContain("safe-area-inset-top");
   });

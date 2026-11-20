@@ -78,11 +78,34 @@ def complete_user_device_login(
     if not code:
         raise ValueError("device_code is required")
     binary, env = _prepare(config_dir, app_id=app_id, app_secret=app_secret, default_as="bot")
-    run_cli(
-        [binary, "auth", "login", "--device-code", code, "--json"],
-        env=env,
-        timeout_s=120.0,
-    )
+    try:
+        run_cli(
+            [binary, "auth", "login", "--device-code", code, "--json"],
+            env=env,
+            timeout_s=120.0,
+        )
+    except ValueError as exc:
+        # A CLI output failure can occur after saving the token. Only recover
+        # this exact diagnostic, with a valid grant in the same instance.
+        if str(exc).strip() != "[lark-cli] device-flow: token response received":
+            raise
+        try:
+            current = read_auth_status(binary=binary, env=env)
+            identities = current.get("identities")
+            current_user = identities.get("user") if isinstance(identities, dict) else None
+            valid_user = (
+                current.get("appId") == app_id.strip()
+                and isinstance(current_user, dict)
+                and current_user.get("available") is True
+                and str(current_user.get("tokenStatus") or "").strip().lower() == "valid"
+            )
+            recoverable = valid_user and _auth_has_scope(
+                binary=binary, env=env, scope="search:docs:read"
+            )
+        except ValueError:
+            raise exc from None
+        if not recoverable:
+            raise
     run_cli([binary, "config", "default-as", "user"], env=env, timeout_s=30.0)
     status = read_auth_status(binary=binary, env=env)
     user = (

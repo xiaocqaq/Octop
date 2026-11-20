@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import i18n from "i18next";
+import zh from "../../../locales/zh.json";
 import * as store from "./chatStore";
 import { clearInflightTail } from "../utils/inflightTranscriptCache";
 
@@ -31,7 +33,8 @@ class Socket {
   }
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  await i18n.init({ lng: "zh", resources: { zh: { translation: zh } } });
   Socket.instances = [];
   vi.stubGlobal("WebSocket", Socket);
 });
@@ -99,6 +102,122 @@ it("ignores late frames and close events from a replaced socket", async () => {
     "next",
     "second reply",
   ]);
+});
+
+it("shows a failed turn fallback without discarding partial output", async () => {
+  const sent = store.sendTurn(
+    session,
+    "question",
+    "agent",
+    "",
+    undefined,
+    undefined,
+    null,
+    session,
+  );
+  await Promise.resolve();
+  const socket = Socket.instances[0];
+  socket.frame({ type: "turn.started", turn_id: "failed-turn" });
+  socket.frame({
+    type: "token",
+    content: "partial reply",
+    turn_id: "failed-turn",
+  });
+  socket.frame({ type: "done" });
+  socket.frame({ type: "turn.ended", turn_id: "failed-turn", failed: true });
+  await sent;
+
+  const state = store.getSnapshot(session);
+  expect(
+    state.messages.find((m) => m.content === "partial reply")?.status,
+  ).toBe("done");
+  const errors = state.messages.filter((m) => m.status === "error");
+  expect(errors).toHaveLength(1);
+  expect(errors[0]?.content).toBe(zh.chat.errorOccurred);
+  expect(errors[0]?.errorInfo?.code).toBe("stream_error");
+  expect(state.isStreaming).toBe(false);
+  expect(state.activeTurnId).toBeNull();
+});
+
+it("does not duplicate a detailed error already received for the failed turn", async () => {
+  const sent = store.sendTurn(
+    session,
+    "question",
+    "agent",
+    "",
+    undefined,
+    undefined,
+    null,
+    session,
+  );
+  await Promise.resolve();
+  const socket = Socket.instances[0];
+  socket.frame({ type: "turn.started", turn_id: "failed-turn" });
+  // Receive the detailed chunk before the terminal protocol frame.
+  store.ingestHarnessChunk(session, {
+    type: "error",
+    message: "provider failure",
+  });
+  socket.frame({ type: "turn.ended", turn_id: "failed-turn", failed: true });
+  await sent;
+
+  expect(
+    store
+      .getSnapshot(session)
+      .messages.filter((m) => m.status === "error")
+      .map((m) => m.content),
+  ).toEqual(["provider failure"]);
+});
+
+it.each([true, false, undefined])(
+  "keeps previous errors separate when the next turn ends with failed=%s",
+  async (failed) => {
+    store.setMessages(session, [
+      {
+        id: "old-error",
+        role: "assistant",
+        content: "old failure",
+        status: "error",
+        turnId: "old-turn",
+        timestamp: 1,
+      },
+    ]);
+    await store.attachThread(session, "agent", session);
+    const socket = Socket.instances[0];
+    socket.frame({ type: "turn.resumed", turn_id: "new-turn" });
+    socket.frame({ type: "token", content: "new reply", turn_id: "new-turn" });
+    socket.frame({ type: "turn.ended", turn_id: "new-turn", failed });
+
+    const state = store.getSnapshot(session);
+    const errors = state.messages.filter((m) => m.status === "error");
+    expect(errors).toHaveLength(failed === true ? 2 : 1);
+    expect(state.messages.find((m) => m.content === "new reply")?.status).toBe(
+      "done",
+    );
+    if (failed === true) {
+      expect(errors[1]?.turnId).toBe("new-turn");
+      expect(errors[1]?.content).toBe(zh.chat.errorOccurred);
+    }
+    expect(state.isStreaming).toBe(false);
+  },
+);
+
+it("does not duplicate a restored error after reconnecting to the same turn", async () => {
+  store.setMessages(session, [
+    {
+      id: "error",
+      role: "assistant",
+      content: "provider failure",
+      status: "error",
+      turnId: "failed-turn",
+      timestamp: 1,
+    },
+  ]);
+  await store.attachThread(session, "agent", session);
+  const socket = Socket.instances[0];
+  socket.frame({ type: "turn.resumed", turn_id: "failed-turn" });
+  socket.frame({ type: "turn.ended", turn_id: "failed-turn", failed: true });
+  expect(store.getSnapshot(session).messages).toHaveLength(1);
 });
 
 it("seals a restored streaming bubble when the turn is already idle", async () => {

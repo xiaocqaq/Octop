@@ -13,7 +13,7 @@ Start-time middleware (read in ``AgentManager._build_harness_config``)
 -----------------------------------------------------------------------
 ``tool_call_limit_enabled`` / ``tool_call_run_limit``
     → ``ConsecutiveToolCallMiddleware`` (identical calls in a row; default 40)
-``model_retry_*`` → the host model-retry middleware (default on, 2 retries)
+``model_retry_*`` → the host model-retry middleware (default on, 5 retries)
 ``tool_retry_*``  → LangChain ``ToolRetryMiddleware`` (default on, 5 retries)
 """
 
@@ -47,7 +47,7 @@ AGENT_RUNTIME_CONFIG_KEYS = (
 
 _DEFAULT_MAX_INPUT_TOKENS = 128_000
 DEFAULT_TOOL_CALL_RUN_LIMIT = 40
-DEFAULT_MODEL_RETRY_MAX_RETRIES = 2
+DEFAULT_MODEL_RETRY_MAX_RETRIES = 5
 DEFAULT_TOOL_RETRY_MAX_RETRIES = 5
 DEFAULT_RETRY_INITIAL_DELAY = 1.0
 DEFAULT_RETRY_MAX_DELAY = 60.0
@@ -132,7 +132,7 @@ def _retry_budget(
 
 
 def resolve_model_retry(cfg: dict[str, Any]) -> RetryBudget:
-    """Model-call retry budget. Missing keys keep the host default (on, 2)."""
+    """Model-call retry budget. Missing keys keep the host default (on, 5)."""
     return _retry_budget(
         cfg,
         enabled_key="model_retry_enabled",

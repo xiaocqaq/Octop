@@ -4,7 +4,10 @@ import cx from "classnames";
 import type { HitlActionRequest } from "../../../api/types/hitl";
 import { useToolDisplayNames } from "../hooks/toolDisplayNames";
 import type { HitlRequestResolution } from "../hooks/sseHelpers";
-import type { HitlDecisionHandler } from "../utils/hitlSessionPolicy";
+import {
+  KNOWLEDGE_WRITE_TOOL_NAMES,
+  type HitlDecisionHandler,
+} from "../utils/hitlSessionPolicy";
 import {
   summarizeHitlAction,
   type HitlTranslate,
@@ -51,6 +54,9 @@ export default function HitlApprovalCard({
     else onDecision?.(decisions);
   };
   const toolNames = uniqueToolNames(actions);
+  const onceOnly = toolNames.some((name) =>
+    KNOWLEDGE_WRITE_TOOL_NAMES.has(name),
+  );
   const allowToolsLabel =
     toolNames.length > 1
       ? t("chat.hitl.allowTools", "Allow these tools for this chat")
@@ -124,22 +130,24 @@ export default function HitlApprovalCard({
             >
               {t("chat.hitl.approve", "Approve")}
             </button>
-            <button
-              type="button"
-              className={cx(styles.actionButton, styles.secondaryAction)}
-              title={allowToolsLabel}
-              onClick={() =>
-                emit(
-                  actions.map(() => ({ type: "approve" })),
-                  {
-                    mode: "allow_tools",
-                    tools: toolNames,
-                  },
-                )
-              }
-            >
-              {t("chat.hitl.allowSession", "Allow for this chat")}
-            </button>
+            {!onceOnly && (
+              <button
+                type="button"
+                className={cx(styles.actionButton, styles.secondaryAction)}
+                title={allowToolsLabel}
+                onClick={() =>
+                  emit(
+                    actions.map(() => ({ type: "approve" })),
+                    {
+                      mode: "allow_tools",
+                      tools: toolNames,
+                    },
+                  )
+                }
+              >
+                {t("chat.hitl.allowSession", "Allow for this chat")}
+              </button>
+            )}
             <button
               type="button"
               className={cx(styles.actionButton, styles.dangerAction)}
@@ -155,20 +163,22 @@ export default function HitlApprovalCard({
               {t("chat.hitl.reject", "Reject")}
             </button>
           </div>
-          <button
-            type="button"
-            className={styles.allowAllLink}
-            onClick={() =>
-              emit(
-                actions.map(() => ({ type: "approve" })),
-                {
-                  mode: "allow_all",
-                },
-              )
-            }
-          >
-            {t("chat.hitl.allowAllLink", "Allow all tools in this chat")}
-          </button>
+          {!onceOnly && (
+            <button
+              type="button"
+              className={styles.allowAllLink}
+              onClick={() =>
+                emit(
+                  actions.map(() => ({ type: "approve" })),
+                  {
+                    mode: "allow_all",
+                  },
+                )
+              }
+            >
+              {t("chat.hitl.allowAllLink", "Allow all tools in this chat")}
+            </button>
+          )}
         </>
       ) : status !== "pending" ? (
         <div

@@ -8,6 +8,14 @@ export type { HitlDecisionHandler, HitlSessionMode, HitlSessionPolicy };
 
 export const DEFAULT_HITL_SESSION_POLICY: HitlSessionPolicy = { mode: "ask" };
 
+export const KNOWLEDGE_WRITE_TOOL_NAMES = new Set([
+  "create_knowledge_base",
+  "update_knowledge_base",
+  "create_knowledge_document",
+  "upload_knowledge_document",
+  "update_knowledge_document",
+]);
+
 export function parseHitlSessionPolicy(value: unknown): HitlSessionPolicy {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return DEFAULT_HITL_SESSION_POLICY;

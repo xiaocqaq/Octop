@@ -1,6 +1,8 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TrajectoryEvent } from "../../../api/modules/trajectory";
+// Preload the real renderer before assertions on lazy Markdown content.
+import "../../../components/Markdown";
 
 const eventMock = vi.fn();
 

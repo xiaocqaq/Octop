@@ -7,7 +7,9 @@ import json
 import os
 import shutil
 import sys
+from collections.abc import Callable
 from dataclasses import replace
+from functools import partial
 from pathlib import Path
 
 import pytest
@@ -33,6 +35,35 @@ from octop.infra.utils import posix_compat as pwd
 pytestmark = pytest.mark.skipif(os.name != "posix", reason="POSIX service management")
 
 
+@pytest.fixture(autouse=True)
+def _isolate_service_effects(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> Callable[..., None]:
+    """Service tests must explicitly mock commands and keep all writes in tmp_path."""
+
+    def deny_subprocess(*_args: object, **_kwargs: object) -> None:
+        # Also escape best-effort service helpers that catch Exception.
+        pytest.fail("unmocked subprocess in service unit test")
+
+    write_managed_file = service_mod._write_managed_file
+
+    def write_in_tmp(destination: Path, content: str, *, run_as_user: str) -> None:
+        if not destination.resolve().is_relative_to(tmp_path.resolve()):
+            pytest.fail(f"service write outside tmp_path: {destination}")
+        write_managed_file(destination, content, run_as_user=run_as_user)
+
+    monkeypatch.setattr(service_mod.subprocess, "run", deny_subprocess)
+    monkeypatch.setattr(service_mod.subprocess, "Popen", deny_subprocess)
+    monkeypatch.setattr(service_mod, "_write_managed_file", write_in_tmp)
+    monkeypatch.setattr(
+        service_mod.tempfile,
+        "NamedTemporaryFile",
+        partial(service_mod.tempfile.NamedTemporaryFile, dir=tmp_path),
+    )
+    monkeypatch.setenv("OCTOP_HOME", str(tmp_path / "octop-home"))
+    return deny_subprocess
+
+
 def _runtime(tmp_path: Path) -> ServiceRuntime:
     octop_bin = tmp_path / "bin" / "octop"
     octop_bin.parent.mkdir(parents=True)
@@ -45,6 +76,42 @@ def _runtime(tmp_path: Path) -> ServiceRuntime:
         octop_bin=octop_bin,
         run_as_user=getpass.getuser(),
     )
+
+
+@pytest.mark.parametrize("command", ["systemd", "launchd", "linger", "Popen"])
+def test_service_test_guard_blocks_unmocked_commands(
+    _isolate_service_effects: Callable[..., None], tmp_path: Path, command: str
+) -> None:
+    # Fail before invoking any helper if the fixture ever stops installing its guard.
+    assert service_mod.subprocess.run is _isolate_service_effects
+    assert service_mod.subprocess.Popen is _isolate_service_effects
+    runtime = replace(_runtime(tmp_path), scope="user")
+    with pytest.raises(pytest.fail.Exception, match="unmocked subprocess"):
+        if command == "systemd":
+            service_mod._systemd_run(runtime, "status", "octop")
+        elif command == "launchd":
+            service_mod._launchctl_run("user", "list")
+        elif command == "linger":
+            service_mod._systemd_enable_linger(runtime)
+        else:
+            service_mod.subprocess.Popen(["systemctl", "--version"])
+
+
+@pytest.mark.parametrize("writer", ["unit", "nofile", "resource"])
+def test_service_test_guard_blocks_writes_outside_tmp_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, writer: str
+) -> None:
+    destination = tmp_path.parent / f"{tmp_path.name}-outside" / "octop.service"
+    monkeypatch.setattr(service_mod, "unit_path", lambda *_a, **_k: destination)
+    runtime = _runtime(tmp_path)
+    with pytest.raises(pytest.fail.Exception, match="service write outside tmp_path"):
+        if writer == "unit":
+            service_mod._write_unit(runtime)
+        elif writer == "nofile":
+            service_mod.ensure_nofile_dropin(runtime)
+        else:
+            service_mod.ensure_resource_dropin(runtime)
+    assert not destination.parent.exists()
 
 
 def test_resolve_octop_executable_falls_back_to_path(
@@ -76,10 +143,16 @@ def test_render_systemd_unit_user_scope(tmp_path: Path) -> None:
     assert "--host" not in unit
 
 
-def test_render_systemd_unit_system_scope(tmp_path: Path) -> None:
-    runtime = _runtime(tmp_path)
+def test_render_systemd_unit_system_scope(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    account_home = tmp_path / "fakeaccount-home"
+    monkeypatch.setattr(
+        service_mod.pwd,
+        "getpwnam",
+        lambda _name: type("Pw", (), {"pw_dir": str(account_home)})(),
+    )
+    runtime = replace(_runtime(tmp_path), run_as_user="fakeaccount")
     unit = render_systemd_unit(runtime, user_unit=False)
-    assert f"User={getpass.getuser()}" in unit
+    assert "User=fakeaccount" in unit
     assert 'Environment="HOME=' in unit
     assert "WantedBy=multi-user.target" in unit
     assert "OCTOP_SYSTEMD_USER=1" not in unit
@@ -95,10 +168,13 @@ def test_render_systemd_unit_system_scope_uses_runtime_scope_by_default(
     before any system unit existed, so the first install omitted ``User=`` and
     systemd ran the daemon as root.
     """
-    import getpass
-
-    user = getpass.getuser()
-    account_home = Path(pwd.getpwnam(user).pw_dir)
+    user = "fakeaccount"
+    account_home = tmp_path / "fakeaccount-home"
+    monkeypatch.setattr(
+        service_mod.pwd,
+        "getpwnam",
+        lambda _name: type("Pw", (), {"pw_dir": str(account_home)})(),
+    )
     runtime = replace(_runtime(tmp_path), run_as_user=user, scope="system")
 
     unit = render_systemd_unit(runtime)
@@ -446,13 +522,23 @@ def test_render_launchd_plist_includes_service_mode(tmp_path: Path) -> None:
     assert "<string>--port</string>" not in plist
 
 
-def test_stop_service_noop_when_not_installed(tmp_path: Path) -> None:
-    runtime = _runtime(tmp_path)
+@pytest.mark.parametrize("mode", ["systemd", "launchd"])
+@pytest.mark.parametrize("scope", ["user", "system"])
+def test_stop_service_noop_when_not_installed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mode: str, scope: str
+) -> None:
+    runtime = replace(_runtime(tmp_path), mode=mode, scope=scope)
+    monkeypatch.setattr(service_mod, "is_service_installed", lambda *_a, **_k: False)
     stop_service(runtime)
 
 
-def test_restart_service_requires_install(tmp_path: Path) -> None:
-    runtime = _runtime(tmp_path)
+@pytest.mark.parametrize("mode", ["systemd", "launchd"])
+@pytest.mark.parametrize("scope", ["user", "system"])
+def test_restart_service_requires_install(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mode: str, scope: str
+) -> None:
+    runtime = replace(_runtime(tmp_path), mode=mode, scope=scope)
+    monkeypatch.setattr(service_mod, "is_service_installed", lambda *_a, **_k: False)
     with pytest.raises(RuntimeError, match="not installed"):
         restart_service(runtime)
 
@@ -880,7 +966,8 @@ def test_write_unit_sudo_path_creates_parent_dir_first(
     the mkdir made the first-ever install fail silently.
     """
     runtime = replace(_runtime(tmp_path), mode="launchd", scope="user")
-    destination = unit_path("launchd", scope="user", run_as_user=runtime.run_as_user)
+    destination = tmp_path / "Library" / "LaunchAgents" / "octop.plist"
+    monkeypatch.setattr(service_mod, "unit_path", lambda *_a, **_k: destination)
 
     cmds: list[list[str]] = []
 
@@ -896,7 +983,7 @@ def test_write_unit_sudo_path_creates_parent_dir_first(
 
     # Force the sudo branch regardless of the on-disk state of ~/Library.
     monkeypatch.setattr(service_mod, "_needs_sudo", lambda _p: True)
-    monkeypatch.setattr(service_mod, "os", _FakeOs(root=False))
+    monkeypatch.setattr(service_mod, "geteuid", lambda: 501)
     monkeypatch.setattr(service_mod, "_run_cmd", _fake_run_cmd)
 
     service_mod._write_unit(runtime)
@@ -911,32 +998,16 @@ def test_write_unit_sudo_path_creates_parent_dir_first(
     assert cp_index > mkdir_index, f"cp must run after mkdir: {cmds}"
     # And the mkdir target is the unit's parent directory.
     assert str(destination.parent) in cmds[mkdir_index]
+    temporary_source = Path(cmds[cp_index][1])
+    assert temporary_source.parent == tmp_path
+    assert not temporary_source.exists()
+    assert not destination.exists()
 
 
 def test_needs_sudo_false_when_an_ancestor_is_writable(tmp_path: Path) -> None:
     """Missing drop-in directory under a writable home must not force sudo."""
     nested = tmp_path / "systemd" / "user" / "octop.service.d" / "10-nofile.conf"
     assert service_mod._needs_sudo(nested) is False
-
-
-class _FakeOs:
-    """Minimal stand-in for `os` so we can stub `geteuid` and `W_OK` checks."""
-
-    def __init__(self, *, root: bool) -> None:
-        self._root = root
-
-    def geteuid(self) -> int:
-        return 0 if self._root else 501
-
-    def getuid(self) -> int:
-        return 501
-
-    def access(self, _path: object, _mode: int) -> bool:
-        return False  # always unwritable → forces sudo path
-
-    def unlink(self, _path: object) -> None:
-        # The tmp file is `delete=False`, so this is called in `finally`.
-        return None
 
 
 def test_persist_bind_options_refuses_corrupt_config(tmp_path: Path) -> None:

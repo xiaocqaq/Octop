@@ -17,7 +17,7 @@ import styles from "../index.module.less";
 
 interface ChatInputPreviewBarProps {
   attachments: ChatAttachment[];
-  uploading: boolean;
+  uploadProgress: number | null;
   selectedConnectors: string[];
   selectedKnowledgeBaseIds: string[];
   selectedModel?: string | null;
@@ -93,7 +93,7 @@ function ComposerImagePreview({
 
 export default function ChatInputPreviewBar({
   attachments,
-  uploading,
+  uploadProgress,
   selectedConnectors,
   selectedKnowledgeBaseIds,
   availableConnectors,
@@ -105,6 +105,7 @@ export default function ChatInputPreviewBar({
   availableModels,
   onModelChange,
 }: ChatInputPreviewBarProps) {
+  const { t } = useTranslation();
   // Show the chip whenever a model is explicitly selected, mirroring how
   // connectors behave — not only when it differs from the
   // agent default (that was the old "override" behavior).
@@ -113,7 +114,7 @@ export default function ChatInputPreviewBar({
 
   const hasContent =
     attachments.length > 0 ||
-    uploading ||
+    uploadProgress != null ||
     selectedConnectors.length > 0 ||
     selectedKnowledgeBaseIds.length > 0 ||
     showModelChip;
@@ -216,11 +217,12 @@ export default function ChatInputPreviewBar({
           </div>
         );
       })}
-      {uploading && (
-        <div className={styles.imagePreviewItem}>
-          <div className={styles.imagePreviewLoading}>
-            <div className={styles.uploadSpinner} />
-          </div>
+      {uploadProgress != null && (
+        <div className={styles.uploadProgress} role="status">
+          <span className={styles.uploadSpinner} aria-hidden="true" />
+          {uploadProgress < 100
+            ? t("upload.progress", { percent: uploadProgress })
+            : t("upload.finishing")}
         </div>
       )}
       {availableConnectors &&

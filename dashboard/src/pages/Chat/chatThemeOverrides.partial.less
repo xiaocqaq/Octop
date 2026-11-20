@@ -828,9 +828,9 @@
 .chatInput {
   position: relative;
   z-index: 1;
-  padding-top: 10px;
+  padding-top: 8px;
   padding-inline: var(--chat-column-pad-x, 32px);
-  padding-bottom: 18px;
+  padding-bottom: 10px;
   background: var(--fn-bg-elevated, #fff);
 
   @media (max-width: 767px) {
@@ -858,15 +858,15 @@
   margin: 0 auto;
   width: 100%;
   box-sizing: border-box;
-  border-radius: 24px;
-  padding: 10px 12px 10px 16px;
+  border-radius: 16px;
+  padding: 6px 12px 6px 16px;
   background: var(--fn-bg-primary);
   border: 1px solid var(--fn-assistant-bubble-border);
   box-shadow: 0 3px 10px rgba(15, 23, 42, 0.05);
 
   @media (max-width: 767px) {
     padding: 6px 10px 6px 14px;
-    border-radius: 20px;
+    border-radius: 16px;
   }
 }
 
@@ -878,18 +878,14 @@
 }
 
 .textarea {
-  min-height: 64px;
+  min-height: 36px;
   font-size: 14px;
   line-height: 1.6;
-
-  @media (max-width: 767px) {
-    min-height: 40px;
-  }
 }
 
 .actionsRow {
-  margin-top: 8px;
-  padding-top: 8px;
+  margin-top: 4px;
+  padding-top: 4px;
   border-top: 1px solid var(--fn-color-brand-glow);
 
   @media (max-width: 767px) {
@@ -928,7 +924,7 @@
 
 .aiDisclaimer {
   max-width: 960px;
-  margin: 8px auto 0;
+  margin: 4px auto 0;
   width: calc(100% - 2 * var(--chat-column-pad-x, 32px));
 }
 

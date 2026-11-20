@@ -290,6 +290,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
     const {
       attachments,
       uploading,
+      uploadProgress,
       dragOver,
       fileInputRef,
       folderInputRef,
@@ -477,7 +478,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
     }, [text, agentId, threadId]);
     const submitRef = useRef<() => void>(() => {});
 
-    const MIN_TEXTAREA_HEIGHT = isMobile ? 42 : 78;
+    const MIN_TEXTAREA_HEIGHT = 36;
 
     const {
       slashMenuOpen,
@@ -624,7 +625,8 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
 
     const submitMessage = useCallback(() => {
       const trimmed = text.trim();
-      if ((!trimmed && attachments.length === 0) || disabled) return;
+      if ((!trimmed && attachments.length === 0) || disabled || uploading)
+        return;
       const wireText = materializeSkillSlashes(trimmed, skillTokenRefs).trim();
       const slashItem = matchSlashCommand(wireText);
       if (slashItem && slashItem.spec.client_action !== "none") {
@@ -668,6 +670,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
       onSend,
       onQueue,
       disabled,
+      uploading,
       isStreaming,
       holdSend,
       isTeam,
@@ -863,7 +866,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
     ]);
 
     const canSend = Boolean(
-      (text.trim() || attachments.length > 0) && !disabled,
+      (text.trim() || attachments.length > 0) && !disabled && !uploading,
     );
     const showDrop = dragOver || nativeDropActive;
 
@@ -895,7 +898,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
           )}
           <ChatInputPreviewBar
             attachments={attachments}
-            uploading={uploading}
+            uploadProgress={uploadProgress}
             selectedConnectors={selectedConnectors}
             selectedModel={selectedModel}
             availableModels={availableModels}

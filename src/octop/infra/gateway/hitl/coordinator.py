@@ -28,6 +28,7 @@ from octop.infra.gateway.hitl.store import HitlPendingRecord, HitlPendingStore
 from octop.infra.gateway.process.usage_record import UsageTracker
 from octop.infra.gateway.slash.ctx import ensure_thread_id
 from octop.infra.gateway.slash.formatting import markdown_bullets
+from octop.infra.knowledge.approval import KNOWLEDGE_WRITE_TOOL_NAMES
 from octop.infra.utils.locale import Locale, normalize_locale
 from octop.infra.utils.stream_close import close_event_stream
 
@@ -139,7 +140,11 @@ def approve_decisions_if_allowed(
         if not isinstance(action, dict):
             return None
         name = action.get("name")
-        if not isinstance(name, str) or not allows(thread_id, name):
+        if (
+            not isinstance(name, str)
+            or name in KNOWLEDGE_WRITE_TOOL_NAMES
+            or not allows(thread_id, name)
+        ):
             return None
         if not _action_allows_approve(request, name):
             return None
@@ -776,7 +781,11 @@ class HitlChannelCoordinator:
                 _StickyStamp(thread_id, previous, self.session_policies.revision(thread_id))
             )
 
-        if sticky == "once":
+        if sticky == "once" or any(
+            action.get("name") in KNOWLEDGE_WRITE_TOOL_NAMES
+            for action in record.action_requests
+            if isinstance(action, dict)
+        ):
             return "once", stamps
         thread_ids = self._sticky_thread_ids(record)
         if sticky == "all":
