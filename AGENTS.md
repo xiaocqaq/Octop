@@ -217,6 +217,8 @@ cd dashboard && npx tsc -b             # frontend typecheck (after UI changes)
 make build-frontend                     # dashboard/ → src/octop/dashboard/
 ```
 
+**Shared-host resources:** Run builds strictly one at a time on this host, including builds triggered by Git hooks, other worktrees, and subagents. Do not overlap a build with full test suites or other memory-heavy validation. Wait for the current job and its child processes to finish before starting the next phase.
+
 **Git hooks (required for local commits):** after cloning, run **`make install-hooks`** once. That sets `core.hooksPath=.githooks` so every `git commit` runs **`make all`** (which first runs **`format-all`**: backend Ruff + dashboard Prettier write, then lint / typecheck / test) and dashboard **`npm run build`**. Formatted files that were already staged are re-added so the commit includes the formatted content. Bypass only in emergencies: `SKIP_PRECOMMIT=1 git commit …` or `git commit --no-verify`. Do **not** skip hooks to land red tests — fix the suite first (CI runs on Linux **and** Windows).
 
 ## 7. Key patterns

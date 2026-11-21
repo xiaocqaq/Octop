@@ -182,6 +182,8 @@ export default defineConfig(({ mode }) => {
           "apple-touch-icon.png",
         ],
         workbox: {
+          // Keep production SW compression to one chunk (one Terser worker).
+          inlineWorkboxRuntime: true,
           // Notification clicks are handled here. The production worker must
           // not skipWaiting; notify-sw.js only does that when it is the worker.
           importScripts: ["notify-sw.js"],

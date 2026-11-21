@@ -118,7 +118,9 @@ export default function SideChatShell({
           closable={false}
           keyboard={open}
           forceRender
-          styles={{ body: { padding: 0 } }}
+          styles={{
+            body: { padding: 0, paddingTop: "env(safe-area-inset-top, 0px)" },
+          }}
           rootStyle={{ visibility: open ? undefined : "hidden" }}
         >
           <div className={styles.contentSlot} ref={attachContent} />

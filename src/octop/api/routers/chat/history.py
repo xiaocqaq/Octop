@@ -296,9 +296,10 @@ async def post_side_chat(
     "/agents/{agent_id}/threads/{thread_id}/persist",
     response_model=SideChatThreadResponse,
     summary="Persist side chat",
-    description="Idempotently clear the side chat expiry and reveal it in the thread list. Does not change the main dashboard session. Expired threads cannot be saved.",
+    description="Atomically clear the side chat expiry and add a localized title suffix on first save. Repeated saves preserve the title, including later user edits. Does not change the main dashboard session. Expired threads cannot be saved.",
 )
 async def post_persist_side_chat(
+    request: Request,
     agent_id: str,
     thread_id: str,
     as_user: int | None = None,
@@ -311,6 +312,7 @@ async def post_persist_side_chat(
         agent_id=agent_id,
         thread_id=thread_id,
         user_id=as_user if as_user is not None else user.id,
+        locale=resolve_request_locale(request),
     )
     return _side_chat_response(server, agent_id, row)
 

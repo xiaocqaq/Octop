@@ -374,7 +374,11 @@ describe("SideChatPanel", () => {
     const panelProps = props();
     const onHide = vi.fn();
     render(<SideChatPanel {...panelProps} onHide={onHide} />);
-    fireEvent.click(screen.getByRole("button", { name: "chat.sideChat.hide" }));
+    const hideButton = screen.getByRole("button", {
+      name: "chat.sideChat.hide",
+    });
+    expect(hideButton).not.toHaveAttribute("title");
+    fireEvent.click(hideButton);
     expect(onHide).toHaveBeenCalledOnce();
     expect(panelProps.onClose).not.toHaveBeenCalled();
     fireEvent.click(

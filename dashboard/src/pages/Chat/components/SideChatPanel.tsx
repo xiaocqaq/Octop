@@ -269,7 +269,6 @@ function SideChatPanelContent({
               size="small"
               icon={<PanelRightClose size={17} />}
               aria-label={t("chat.sideChat.hide")}
-              title={t("chat.sideChat.hide")}
               onClick={onHide}
             />
           )}

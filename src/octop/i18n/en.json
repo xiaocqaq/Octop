@@ -781,7 +781,9 @@
     "gc_would_delete": "Would delete {count} orphan threads, {bytes} bytes.",
     "gc_deleted": "Deleted {count} orphan threads, {bytes} bytes.",
     "fork_title_suffix": " (fork)",
-    "fork_default_title": "Forked chat"
+    "fork_default_title": "Forked chat",
+    "side_chat_title_suffix": " -Side chat",
+    "side_chat_default_title": "Side chat"
   },
   "cron": {
     "history": {

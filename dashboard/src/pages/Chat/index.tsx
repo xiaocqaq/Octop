@@ -1467,11 +1467,7 @@ function ChatPageInner() {
   };
   const sideChatToggle =
     !sharedExpertViewer && !isTeamChat && !activeAgent?.bridge ? (
-      <Tooltip
-        title={t(
-          sideChat.visible ? "chat.sideChat.hide" : "chat.sideChat.open",
-        )}
-      >
+      <Tooltip title={sideChat.visible ? undefined : t("chat.sideChat.open")}>
         <Button
           type="text"
           aria-label={t(

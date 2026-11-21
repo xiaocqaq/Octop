@@ -801,7 +801,9 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
 
     const adjustHeight = useCallback(() => {
       const ta = textareaRef.current;
-      if (!ta) return;
+      if (!ta || !active || !ta.isConnected) return;
+      const rect = ta.getBoundingClientRect();
+      if (rect.width <= 0) return;
       // Measure the content height on a detached clone instead of collapsing
       // the live textarea to height:"auto". That transient shrink reflows the
       // flex layout and makes the message list viewport (a sibling above the
@@ -812,7 +814,6 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
       const target = (() => {
         const clone = ta.cloneNode(false) as HTMLTextAreaElement;
         clone.value = ta.value;
-        const rect = ta.getBoundingClientRect();
         clone.style.cssText = [
           "position:fixed",
           "left:-9999px",
@@ -837,11 +838,25 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
       // eslint-disable-next-line @typescript-eslint/no-unused-expressions
       ta.offsetHeight; // force reflow
       ta.style.transition = "";
-    }, [MIN_TEXTAREA_HEIGHT]);
+    }, [MIN_TEXTAREA_HEIGHT, active]);
 
     useEffect(() => {
       adjustHeight();
     }, [text, adjustHeight]);
+
+    useEffect(() => {
+      const textarea = textareaRef.current;
+      if (!textarea || !active) return;
+      let previousWidth = 0;
+      const observer = new ResizeObserver(([entry]) => {
+        const width = entry?.contentRect.width ?? 0;
+        if (width <= 0 || width === previousWidth) return;
+        previousWidth = width;
+        adjustHeight();
+      });
+      observer.observe(textarea);
+      return () => observer.disconnect();
+    }, [active, adjustHeight]);
 
     const handlePolish = useCallback(async () => {
       const draft = text.trim();

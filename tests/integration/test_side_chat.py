@@ -105,18 +105,52 @@ async def test_empty_and_user_only_context_can_snapshot(env: Any, messages: list
     assert (await _create(env))["copied_messages"] == len(messages)
 
 
-async def test_persist_is_idempotent_listed_and_keeps_main_binding(env: Any) -> None:
+@pytest.mark.parametrize(
+    ("language", "title", "expected"),
+    [
+        ("zh-CN,en;q=0.8", "讨论方案", "讨论方案 -侧边聊天"),
+        ("en-US,zh;q=0.8", "Discussion", "Discussion -Side chat"),
+        ("zh", None, "侧边聊天"),
+        ("en", "", "Side chat"),
+        ("zh", "   ", "侧边聊天"),
+        ("zh", "讨论方案 -侧边聊天", "讨论方案 -侧边聊天"),
+        ("en", "Discussion -Side chat", "Discussion -Side chat"),
+        ("zh", "长" * 40, "长" * 33 + "… -侧边聊天"),
+    ],
+)
+async def test_persist_is_idempotent_listed_and_keeps_main_binding(
+    env: Any, language: str, title: str | None, expected: str
+) -> None:
     c, srv, _agent, users, aid, source = env
-    side = await _create(env)
+    repo = srv.services.thread_repo
+    if title is not None:
+        repo.update_title(source, title)
     registry = srv.app_runtime.gateway.thread_registry
-    uid = registry.get_thread(source).user_id
+    parent_before = registry.get_thread(source)
+    side = await _create(env)
+    tid = side["thread_id"]
+    uid = parent_before.user_id
     main = ThreadRegistry.dashboard_key(agent_id=aid, user_id=uid)
-    for _ in range(2):
-        r = await c.post(
-            f"/api/agents/{aid}/threads/{side['thread_id']}/persist", headers=users["alice"]
+    # Observe the title at the exact SQL transition that clears the TTL.
+    with repo._db.transaction() as conn:
+        conn.execute("CREATE TABLE persist_observations(title TEXT)")
+        conn.execute(
+            "CREATE TRIGGER observe_persist AFTER UPDATE OF expires_at ON threads "
+            "WHEN NEW.side_chat = 1 AND NEW.expires_at IS NULL BEGIN "
+            "INSERT INTO persist_observations(title) VALUES (NEW.title); END"
         )
+    for headers in (
+        {**users["alice"], "Accept-Language": language},
+        {**users["alice"], "Accept-Language": "en" if language.startswith("zh") else "zh"},
+    ):
+        r = await c.post(f"/api/agents/{aid}/threads/{tid}/persist", headers=headers)
         assert r.status_code == 200, r.text
         assert r.json()["expires_at"] is None and r.json()["side_chat"] is True
+        assert r.json()["title"] == expected
+    with repo._db.connect() as conn:
+        observed = conn.execute("SELECT title FROM persist_observations").fetchall()
+    assert observed and all(row["title"] == expected for row in observed)
+    assert registry.get_thread(source) == parent_before
     listed = (await c.get(f"/api/agents/{aid}/threads", headers=users["alice"])).json()
     assert side["thread_id"] in [r["thread_id"] for r in listed]
     assert registry.get_bound_thread_id(main) == source
@@ -129,6 +163,18 @@ async def test_persist_is_idempotent_listed_and_keeps_main_binding(env: Any) -> 
     )
     assert tid == side["thread_id"] and key == side["session_key"]
     assert registry.get_bound_thread_id(main) == source
+    renamed = await c.patch(
+        f"/api/agents/{aid}/threads/{side['thread_id']}",
+        headers=users["alice"],
+        json={"title": "用户自定义标题"},
+    )
+    assert renamed.status_code == 200, renamed.text
+    repeated = await c.post(
+        f"/api/agents/{aid}/threads/{side['thread_id']}/persist", headers=users["alice"]
+    )
+    assert repeated.status_code == 200, repeated.text
+    assert repeated.json()["title"] == "用户自定义标题"
+    assert registry.get_thread(source) == parent_before
 
 
 async def test_owner_agent_scope_and_busy_sources(
@@ -142,17 +188,33 @@ async def test_owner_agent_scope_and_busy_sources(
     assert (
         await c.post(f"/api/agents/{aid}/threads/{source}/side-chat", headers=users["bob"])
     ).status_code in (403, 404)
+    side = await _create(env)
+    tid = side["thread_id"]
+    registry = srv.app_runtime.gateway.thread_registry
+    before = registry.get_thread(tid)
+    for agent_id, headers in ((other, users["alice"]), (aid, users["bob"])):
+        denied = await c.post(f"/api/agents/{agent_id}/threads/{tid}/persist", headers=headers)
+        assert denied.status_code in (403, 404)
+        assert registry.get_thread(tid) == before
     hub = srv.app_runtime.gateway.ws_hub
     monkeypatch.setattr(hub, "is_turn_active", lambda _tid: True)
     assert (
         await c.post(f"/api/agents/{aid}/threads/{source}/side-chat", headers=users["alice"])
     ).status_code == 409
+    assert (
+        await c.post(f"/api/agents/{aid}/threads/{tid}/persist", headers=users["alice"])
+    ).status_code == 409
+    assert registry.get_thread(tid) == before
     monkeypatch.setattr(hub, "is_turn_active", lambda _tid: False)
     store = srv.app_runtime.gateway.processor.hitl_coordinator.store
-    monkeypatch.setattr(store, "pending_thread_ids", lambda **_kw: {source})
+    monkeypatch.setattr(store, "pending_thread_ids", lambda **_kw: {source, tid})
     assert (
         await c.post(f"/api/agents/{aid}/threads/{source}/side-chat", headers=users["alice"])
     ).status_code == 409
+    assert (
+        await c.post(f"/api/agents/{aid}/threads/{tid}/persist", headers=users["alice"])
+    ).status_code == 409
+    assert registry.get_thread(tid) == before
 
 
 async def test_expiry_blocks_send_persist_and_cleanup_retries_checkpoint_failure(
@@ -193,16 +255,32 @@ async def test_expiry_blocks_send_persist_and_cleanup_retries_checkpoint_failure
 
 
 async def test_persist_and_gc_claim_compare_and_swap(env: Any) -> None:
-    _c, srv, _agent, _users, _aid, _source = env
-    side = await _create(env)
+    c, srv, _agent, users, aid, source = env
     repo = srv.services.thread_repo
+    registry = srv.app_runtime.gateway.thread_registry
+    ordinary = registry.get_thread(source)
+    assert not repo.persist_side_chat(source, now=int(time.time()), title="must not rename")
+    assert (
+        await c.post(f"/api/agents/{aid}/threads/{source}/persist", headers=users["alice"])
+    ).status_code == 404
+    assert registry.get_thread(source) == ordinary
+    side = await _create(env)
     tid = side["thread_id"]
-    assert repo.persist_side_chat(tid, now=int(time.time()))
+    assert repo.persist_side_chat(tid, now=int(time.time()), title="Saved -Side chat")
+    repo.update_title(tid, "User edited")
+    assert repo.persist_side_chat(tid, now=int(time.time()), title="Stale save candidate")
+    assert registry.get_thread(tid).title == "User edited"
     assert not repo.claim_expired_side_chat(tid, now=side["expires_at"] + 1)
     second = await _create(env)
-    _expire(srv, second["thread_id"])
-    assert repo.claim_expired_side_chat(second["thread_id"], now=int(time.time()))
-    assert not repo.persist_side_chat(second["thread_id"], now=int(time.time()))
+    tid = second["thread_id"]
+    _expire(srv, tid)
+    expired = registry.get_thread(tid)
+    assert not repo.persist_side_chat(tid, now=int(time.time()), title="must not rename")
+    assert registry.get_thread(tid) == expired
+    assert repo.claim_expired_side_chat(tid, now=int(time.time()))
+    claimed = registry.get_thread(tid)
+    assert not repo.persist_side_chat(tid, now=int(time.time()), title="must not rename")
+    assert registry.get_thread(tid) == claimed
 
 
 async def test_ws_ignores_spoofed_session_keys_and_excludes_memory(env: Any) -> None:
@@ -322,7 +400,9 @@ async def test_temporary_discard_claim_wins_over_late_persist(
         assert (agent_id, thread_id, reclaim) == (aid, tid, True)
         persist = await c.post(f"/api/agents/{aid}/threads/{tid}/persist", headers=users["alice"])
         assert persist.status_code == 404
-        assert srv.app_runtime.gateway.thread_registry.get_thread(tid) is not None
+        row = srv.app_runtime.gateway.thread_registry.get_thread(tid)
+        assert row is not None and row.title == side["title"]
+        assert row.expires_at == side["expires_at"]
 
     delete = AsyncMock(side_effect=check_late_persist)
     monkeypatch.setattr(srv.app_runtime.agent_registry, "delete_thread_checkpoint", delete)

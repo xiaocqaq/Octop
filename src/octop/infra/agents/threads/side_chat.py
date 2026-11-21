@@ -8,7 +8,8 @@ import logging
 import time
 from typing import Any, cast
 
-from octop.infra.db.repos.threads import ThreadRow
+from octop.i18n import tr
+from octop.infra.db.repos.threads import ThreadRow, clip_thread_title
 from octop.infra.errors import ErrorCode, OctopError
 from octop.infra.gateway.threads import ThreadRegistry
 from octop.infra.history.projection import message_inputs
@@ -113,13 +114,21 @@ async def create_side_chat(
         registry.snapshotting_threads.discard(source_thread_id)
 
 
-def persist_side_chat(server: Any, *, agent_id: str, thread_id: str, user_id: int) -> ThreadRow:
+def persist_side_chat(
+    server: Any, *, agent_id: str, thread_id: str, user_id: int, locale: str = "en"
+) -> ThreadRow:
     registry = server.app_runtime.gateway.thread_registry
     row = registry.get_thread(thread_id)
     require_side_chat_owner(row, agent_id=agent_id, user_id=user_id)
     _assert_idle(server, row)
+    title = (row.title or "").strip()
+    suffix = tr("threads.side_chat_title_suffix", locale)
+    if not title:
+        title = tr("threads.side_chat_default_title", locale)
+    elif not title.endswith(suffix):
+        title = clip_thread_title(title, max_len=40 - len(suffix)) + suffix
     if not row.side_chat or not server.services.thread_repo.persist_side_chat(
-        thread_id, now=int(time.time())
+        thread_id, now=int(time.time()), title=title
     ):
         raise OctopError(ErrorCode.NOT_FOUND, "side chat unavailable")
     saved = registry.get_thread(thread_id)

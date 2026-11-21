@@ -781,7 +781,9 @@
     "gc_would_delete": "将删除 {count} 个孤儿会话，共 {bytes} 字节。",
     "gc_deleted": "已删除 {count} 个孤儿会话，共 {bytes} 字节。",
     "fork_title_suffix": "（分叉）",
-    "fork_default_title": "分叉对话"
+    "fork_default_title": "分叉对话",
+    "side_chat_title_suffix": " -侧边聊天",
+    "side_chat_default_title": "侧边聊天"
   },
   "cron": {
     "history": {

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { createRef } from "react";
 
@@ -139,7 +139,12 @@ import ChatInput, { type ChatInputHandle } from "./ChatInput";
 beforeEach(() => {
   uploadState.uploading = false;
   vi.clearAllMocks();
+  vi.spyOn(
+    HTMLTextAreaElement.prototype,
+    "getBoundingClientRect",
+  ).mockReturnValue(new DOMRect(0, 0, 300, 0));
 });
+afterEach(() => vi.restoreAllMocks());
 
 describe("ChatInput prefill clear-on-send", () => {
   it("keeps empty and short drafts compact", () => {
@@ -155,6 +160,105 @@ describe("ChatInput prefill clear-on-send", () => {
     expect(textarea).toHaveStyle({ height: "36px" });
     fireEvent.change(textarea, { target: { value: "短消息" } });
     expect(textarea).toHaveStyle({ height: "36px" });
+  });
+
+  it("keeps a zero-width retained input compact when it becomes visible", () => {
+    let width = 0;
+    const rect = vi
+      .spyOn(HTMLTextAreaElement.prototype, "getBoundingClientRect")
+      .mockImplementation(() => new DOMRect(0, 0, width, 0));
+    const measure = vi
+      .spyOn(HTMLTextAreaElement.prototype, "scrollHeight", "get")
+      // Real mobile browsers wrap even an empty placeholder at zero width.
+      .mockImplementation(function (this: HTMLTextAreaElement) {
+        return this.style.width === "0px" ? 273 : 26;
+      });
+    const props = {
+      onSend: vi.fn(),
+      onCancel: vi.fn(),
+      onNewChat: vi.fn(),
+      isStreaming: false,
+    };
+    try {
+      const { rerender } = render(<ChatInput {...props} active={false} />);
+      const textarea = screen.getByRole("textbox");
+      expect(textarea.style.height).not.toBe("160px");
+      width = 300;
+      rerender(<ChatInput {...props} active />);
+      expect(screen.getByRole("textbox")).toBe(textarea);
+      expect(textarea).toHaveStyle({ height: "36px" });
+    } finally {
+      measure.mockRestore();
+      rect.mockRestore();
+    }
+  });
+
+  it("remeasures a late-mounted input and wraps drafts when its pane width changes", () => {
+    let width = 0;
+    let notify: ResizeObserverCallback | undefined;
+    const observer = {
+      observe: vi.fn(),
+      unobserve: vi.fn(),
+      disconnect: vi.fn(),
+    };
+    vi.stubGlobal(
+      "ResizeObserver",
+      vi.fn(function (callback: ResizeObserverCallback) {
+        notify = callback;
+        return observer;
+      }),
+    );
+    const rect = vi
+      .spyOn(HTMLTextAreaElement.prototype, "getBoundingClientRect")
+      .mockImplementation(() => new DOMRect(0, 0, width, 0));
+    const measure = vi
+      .spyOn(HTMLTextAreaElement.prototype, "scrollHeight", "get")
+      .mockImplementation(function (this: HTMLTextAreaElement) {
+        return Number.parseFloat(this.style.width) <= 120 ? 96 : 26;
+      });
+    try {
+      const { unmount } = render(
+        <ChatInput
+          onSend={vi.fn()}
+          onCancel={vi.fn()}
+          onNewChat={vi.fn()}
+          isStreaming={false}
+          initialText="a draft that wraps inside a narrow side pane"
+        />,
+      );
+      const textarea = screen.getByRole("textbox");
+      expect(notify).toBeDefined();
+      const resize = (nextWidth: number) => {
+        width = nextWidth;
+        act(
+          () =>
+            notify?.(
+              [
+                {
+                  target: textarea,
+                  contentRect: new DOMRect(0, 0, width, 0),
+                } as ResizeObserverEntry,
+              ],
+              observer,
+            ),
+        );
+      };
+      resize(300);
+      expect(textarea).toHaveStyle({ height: "36px" });
+      resize(120);
+      expect(textarea).toHaveStyle({ height: "96px" });
+      const measurements = measure.mock.calls.length;
+      resize(120);
+      expect(measure).toHaveBeenCalledTimes(measurements);
+      resize(300);
+      expect(textarea).toHaveStyle({ height: "36px" });
+      unmount();
+      expect(observer.disconnect).toHaveBeenCalledOnce();
+    } finally {
+      measure.mockRestore();
+      rect.mockRestore();
+      vi.unstubAllGlobals();
+    }
   });
 
   it("grows for multiline drafts, caps long content, and shrinks after clearing", () => {

@@ -312,13 +312,14 @@ class ThreadRepo:
             ).fetchall()
         return map_rows(rows, ThreadRow)
 
-    def persist_side_chat(self, thread_id: str, *, now: int) -> bool:
-        """CAS against expiry/GC; already persisted side chats are idempotent."""
+    def persist_side_chat(self, thread_id: str, *, now: int, title: str) -> bool:
+        """Atomically name and save; retries preserve saved titles, including user edits."""
         with self._db.transaction() as conn:
             result = conn.execute(
-                "UPDATE threads SET expires_at = NULL WHERE thread_id = ? AND side_chat = 1 "
+                "UPDATE threads SET title = CASE WHEN expires_at IS NULL THEN title ELSE ? END, "
+                "expires_at = NULL WHERE thread_id = ? AND side_chat = 1 "
                 "AND gc_claimed_at IS NULL AND (expires_at IS NULL OR expires_at > ?)",
-                (thread_id, now),
+                (clip_thread_title(title), thread_id, now),
             )
             return bool(result.rowcount == 1)
 

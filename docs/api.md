@@ -247,10 +247,15 @@ Creation and persistence return thread metadata plus `side_chat: true`,
 `source_thread_id`, `copied_messages`, and `expires_at` (Unix seconds, or `null`
 after persistence). Temporary side chats expire exactly 24 hours after creation
 and remain hidden from regular thread lists. Persistence makes them visible while
-retaining their side-chat identity and independent session route. Neither action
-changes the dashboard's main thread binding. The source must belong to the acting
-user and agent and have no active turn or pending human approval. Empty contexts
-and contexts without an assistant reply are valid snapshots.
+retaining their side-chat identity and independent session route. The first save
+atomically clears the TTL and appends ` -侧边聊天` (`zh`) or ` -Side chat` (`en`) to
+the title, selected by the existing request locale resolver (`Accept-Language`;
+default `zh`). Untitled chats use `侧边聊天` / `Side chat`; long titles are shortened
+to retain the full suffix within the existing 40-character limit. Repeated saves
+preserve the saved title, including subsequent user renames. Neither action
+changes the parent title or the dashboard's main thread binding. The source must
+belong to the acting user and agent and have no active turn or pending human
+approval. Empty contexts and contexts without an assistant reply are valid snapshots.
 
 Expired side chats cannot send or persist. Cleanup runs on thread requests and
 periodically; failed checkpoint cleanup keeps metadata for a later retry. Saving
