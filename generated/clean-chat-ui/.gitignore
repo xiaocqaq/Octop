@@ -1,0 +1,10 @@
+# Regenerated fixture screenshots, verification output and ZIP packages.
+*.png
+*.zip
+browser-results.json
+native-chat.css
+
+# This plugin UI is hand-authored distributable ESM, not a generated frontend build.
+!/clean-chat-ui/ui/dist/
+!/clean-chat-ui/ui/dist/index.js
+!/clean-chat-ui/ui/dist/manifest.json

@@ -26,6 +26,7 @@ import { navAllowed, userCan } from "../../utils/permissions";
 import { useChat } from "./hooks/useChat";
 import { useSideChat } from "./hooks/useSideChat";
 import RetainedSideChatPanel from "./components/RetainedSideChatPanel";
+import { SideChatToggleTooltip } from "./components/SideChatToggleTooltip";
 import { useSessions, fetchAndSyncSessionArtifacts } from "./hooks/useSessions";
 import * as chatStore from "./hooks/chatStore";
 import { formatRunUsage, assistantTurnsFromEnd } from "./utils/chatMessages";
@@ -1467,11 +1468,21 @@ function ChatPageInner() {
   };
   const sideChatToggle =
     !sharedExpertViewer && !isTeamChat && !activeAgent?.bridge ? (
-      <Tooltip title={sideChat.visible ? undefined : t("chat.sideChat.open")}>
+      <SideChatToggleTooltip
+        title={
+          sideChat.visible
+            ? undefined
+            : t(sideChat.thread ? "chat.sideChat.show" : "chat.sideChat.open")
+        }
+      >
         <Button
           type="text"
           aria-label={t(
-            sideChat.visible ? "chat.sideChat.hide" : "chat.sideChat.open",
+            sideChat.visible
+              ? "chat.sideChat.hide"
+              : sideChat.thread
+              ? "chat.sideChat.show"
+              : "chat.sideChat.open",
           )}
           aria-expanded={sideChat.visible}
           icon={<MessagesSquare size={17} />}
@@ -1506,7 +1517,7 @@ function ChatPageInner() {
             }
           }}
         />
-      </Tooltip>
+      </SideChatToggleTooltip>
     ) : null;
   const sidePanelToggle = !sharedExpertViewer ? (
     <>

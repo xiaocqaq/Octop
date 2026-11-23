@@ -34,8 +34,8 @@ def test_save_round_trip() -> None:
 
 
 def test_tool_execution_may_pause() -> None:
-    # Knowledge writes require confirmation even when both global gates are off.
-    assert tool_execution_may_pause(SecurityPolicy.defaults()) is True
+    # Knowledge writes follow the global gates instead of forcing approval controls on.
+    assert tool_execution_may_pause(SecurityPolicy.defaults()) is False
     assert tool_execution_may_pause(SecurityPolicy.from_dict({"hitl": {"enabled": True}})) is True
     assert (
         tool_execution_may_pause(
@@ -47,5 +47,5 @@ def test_tool_execution_may_pause() -> None:
         tool_execution_may_pause(
             SecurityPolicy.from_dict({"tool_guard": {"enabled": False, "mode": "require_approval"}})
         )
-        is True
+        is False
     )

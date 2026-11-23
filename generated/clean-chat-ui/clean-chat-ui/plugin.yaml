@@ -1,0 +1,11 @@
+id: clean-chat-ui
+version: 0.1.1
+name: 清爽对话界面
+description: 隐藏输入框与消息的 MCP、知识库、模型标签，以及侧聊新建对话按钮；保留＋菜单选择，不改变资源或模型设置。卸载后刷新恢复。
+kind: tool
+entry: main.py
+icon: "✨"
+group: tools
+ui:
+  entry: ui/dist/index.js
+  manifest: ui/dist/manifest.json

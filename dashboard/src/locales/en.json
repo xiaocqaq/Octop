@@ -1584,6 +1584,7 @@
     "sideChat": {
       "title": "Side chat",
       "open": "Open side chat",
+      "show": "Show side chat",
       "temporaryHint": "Inherits the current context. Switching chats or hiding keeps it; click × to discard, or save as an independent chat.",
       "hide": "Hide side chat",
       "resize": "Resize side chat",

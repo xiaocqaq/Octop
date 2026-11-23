@@ -16,6 +16,7 @@ from octop_harness.backends.workspace import is_system_logical_entry
 from pydantic import Field
 
 from octop.i18n import tr
+from octop.infra.agents.security.policy_store import SecuritySettingsStore
 from octop.infra.errors import ErrorCode, OctopError
 from octop.infra.knowledge import approval, jobs
 from octop.infra.knowledge.gate import assert_knowledge_usable
@@ -136,10 +137,21 @@ def build_knowledge_write_tools(services: Any) -> list[StructuredTool]:
             return _error(ErrorCode.KNOWLEDGE_FORBIDDEN, locale)
 
         try:
-            if write and not approval.require_knowledge_write_approval(*write):
-                return _json(
-                    {"status": "rejected", "message": tr("knowledge_tools.write_rejected", locale)}
+            if write:
+                loop = asyncio.get_running_loop()
+                policy = await loop.run_in_executor(
+                    None, SecuritySettingsStore(settings_repo=services.settings_repo).load
                 )
+                interrupt_config = (policy.resolve_interrupt_on() or {}).get(write[0])
+                if interrupt_config and not approval.require_knowledge_write_approval(
+                    *write, interrupt_config=interrupt_config
+                ):
+                    return _json(
+                        {
+                            "status": "rejected",
+                            "message": tr("knowledge_tools.write_rejected", locale),
+                        }
+                    )
             result = await operation(actor_user_id, is_admin)
             if index_document:
                 jobs.enqueue_index_document(services, result["kb_id"], result["id"])
@@ -179,7 +191,7 @@ def build_knowledge_write_tools(services: Any) -> list[StructuredTool]:
         name: Annotated[str, Field(min_length=1, max_length=80)],
         description: Annotated[str, Field(max_length=2000)] = "",
     ) -> str:
-        """Create a private knowledge base for the current user after confirmation."""
+        """Create a private knowledge base for the current user."""
 
         def create(actor_user_id: int, is_admin: bool) -> dict[str, Any]:
             if not name.strip():
@@ -199,7 +211,7 @@ def build_knowledge_write_tools(services: Any) -> list[StructuredTool]:
         name: Annotated[str | None, Field(min_length=1, max_length=80)] = None,
         description: Annotated[str | None, Field(max_length=2000)] = None,
     ) -> str:
-        """Update a knowledge base name or description after confirmation. Omit fields to keep them."""
+        """Update a knowledge base name or description. Omit fields to keep them."""
 
         def update(actor_user_id: int, is_admin: bool) -> dict[str, Any]:
             if name is not None and not name.strip():
@@ -240,7 +252,7 @@ def build_knowledge_write_tools(services: Any) -> list[StructuredTool]:
             str | None, Field(description="Optional destination directory in the knowledge base.")
         ] = None,
     ) -> str:
-        """Create a Markdown or plain-text knowledge document after confirmation and queue indexing."""
+        """Create a Markdown or plain-text knowledge document and queue indexing."""
 
         def create(actor_user_id: int, is_admin: bool) -> dict[str, Any]:
             document = svc.create_text_document(
@@ -270,7 +282,7 @@ def build_knowledge_write_tools(services: Any) -> list[StructuredTool]:
             str | None, Field(description="Optional destination file path in the knowledge base.")
         ] = None,
     ) -> str:
-        """Upload an Agent workspace file after confirmation and queue it for indexing."""
+        """Upload an Agent workspace file and queue it for indexing."""
 
         async def upload(actor_user_id: int, is_admin: bool) -> dict[str, Any]:
             source = _workspace_relative_path(workspace_path)
@@ -311,7 +323,7 @@ def build_knowledge_write_tools(services: Any) -> list[StructuredTool]:
         )
 
     async def update_knowledge_document(kb_id: str, doc_id: str, content: str) -> str:
-        """Replace the content of a Markdown or plain-text knowledge document and queue reindexing after confirmation."""
+        """Replace the content of a Markdown or plain-text knowledge document and queue reindexing."""
 
         def update(actor_user_id: int, is_admin: bool) -> dict[str, Any]:
             document = svc.update_text_document(

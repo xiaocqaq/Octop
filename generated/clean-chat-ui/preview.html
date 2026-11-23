@@ -1,0 +1,763 @@
+<!doctype html>
+<html lang="zh-CN">
+  <meta charset="utf-8" /><meta
+    name="viewport"
+    content="width=device-width,initial-scale=1"
+  /><title>清爽对话界面 · 隔离预览</title
+  ><style>
+    .index-module__contextChip__wUa3C {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      flex-shrink: 0;
+      max-width: 200px;
+      height: 28px;
+      padding: 0 26px 0 8px;
+      border-radius: 6px;
+      border: 1px solid transparent;
+    }
+    .index-module__contextChipCompact__9pizc {
+      height: 24px;
+      max-width: 180px;
+      padding: 0 10px;
+      gap: 4px;
+      border-color: var(--fn-border-secondary, rgba(0, 0, 0, 0.06)) !important;
+      background: var(--fn-bg-subtle, rgba(0, 0, 0, 0.025)) !important;
+    }
+    .index-module__contextChipCompact__9pizc
+      .index-module__contextChipIcon__w0QCM {
+      background: transparent !important;
+      color: var(--fn-text-tertiary, #94a3b8) !important;
+      font-weight: 500;
+    }
+    .index-module__contextChipCompact__9pizc
+      .index-module__contextChipLabel__vgQ2Q {
+      color: var(--fn-text-tertiary, #94a3b8) !important;
+      font-weight: 400;
+    }
+    .index-module__contextChipIcon__w0QCM {
+      flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 18px;
+      height: 18px;
+      line-height: 0;
+    }
+    .index-module__contextChipCompact__9pizc
+      .index-module__contextChipIcon__w0QCM {
+      width: 16px;
+      height: 16px;
+    }
+    .index-module__contextChipIconImg__S-1yr {
+      width: 14px;
+      height: 14px;
+      object-fit: contain;
+    }
+    .index-module__contextChipCompact__9pizc
+      .index-module__contextChipIconImg__S-1yr {
+      width: 12px;
+      height: 12px;
+    }
+    .index-module__contextChipLabel__vgQ2Q {
+      min-width: 0;
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 12px;
+      font-weight: 500;
+    }
+    .index-module__contextChipCompact__9pizc
+      .index-module__contextChipLabel__vgQ2Q {
+      font-size: 11px;
+      flex: initial;
+    }
+    .index-module__contextChipRemove__BfKue {
+      position: absolute;
+      top: 50%;
+      right: 4px;
+      transform: translateY(-50%);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 18px;
+      height: 18px;
+      padding: 0;
+      border: none;
+      border-radius: 50%;
+      background: transparent;
+      cursor: pointer;
+      line-height: 1;
+      opacity: 0.55;
+      transition:
+        opacity 0.15s,
+        background 0.15s,
+        color 0.15s;
+    }
+    .index-module__contextChipRemove__BfKue:hover {
+      opacity: 1;
+    }
+    .index-module__contextChipSkill__qv-M2 {
+      border-color: #7c3aed38;
+      background: #7c3aed1a;
+    }
+    .index-module__contextChipSkill__qv-M2
+      .index-module__contextChipIcon__w0QCM {
+      border-radius: 50%;
+      background: #7c3aed24;
+      color: #6d28d9;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .index-module__contextChipSkill__qv-M2
+      .index-module__contextChipLabel__vgQ2Q {
+      color: #6d28d9;
+    }
+    .index-module__contextChipSkill__qv-M2
+      .index-module__contextChipRemove__BfKue {
+      color: #6d28d98c;
+    }
+    .index-module__contextChipSkill__qv-M2
+      .index-module__contextChipRemove__BfKue:hover {
+      color: #6d28d9;
+      background: #7c3aed1f;
+    }
+    .index-module__contextChipConnector__-Lnvz {
+      border-color: #2563eb38;
+      background: #2563eb14;
+    }
+    .index-module__contextChipConnector__-Lnvz
+      .index-module__contextChipIcon__w0QCM {
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .index-module__contextChipConnector__-Lnvz
+      .index-module__contextChipLabel__vgQ2Q {
+      color: #1d4ed8;
+    }
+    .index-module__contextChipConnector__-Lnvz
+      .index-module__contextChipRemove__BfKue {
+      color: #1d4ed88c;
+    }
+    .index-module__contextChipConnector__-Lnvz
+      .index-module__contextChipRemove__BfKue:hover {
+      color: #1d4ed8;
+      background: #2563eb1f;
+    }
+    .index-module__contextChipKnowledge__uWnKd {
+      border-color: #0ea5e93d;
+      background: #0ea5e914;
+    }
+    .index-module__contextChipKnowledge__uWnKd
+      .index-module__contextChipIcon__w0QCM {
+      border-radius: 50%;
+      background: #0ea5e924;
+      color: #0284c7;
+    }
+    .index-module__contextChipKnowledge__uWnKd
+      .index-module__contextChipLabel__vgQ2Q {
+      color: #0369a1;
+    }
+    .index-module__contextChipKnowledge__uWnKd
+      .index-module__contextChipRemove__BfKue {
+      color: #0369a18c;
+    }
+    .index-module__contextChipKnowledge__uWnKd
+      .index-module__contextChipRemove__BfKue:hover {
+      color: #0369a1;
+      background: #0ea5e91f;
+    }
+    .index-module__contextChipExpert__uC0Zl {
+      border-color: #6366f138;
+      background: #6366f114;
+    }
+    .index-module__contextChipExpert__uC0Zl
+      .index-module__contextChipLabel__vgQ2Q {
+      color: #4338ca;
+    }
+    .index-module__contextChipExpert__uC0Zl
+      .index-module__contextChipRemove__BfKue {
+      color: #4338ca8c;
+    }
+    .index-module__contextChipExpert__uC0Zl
+      .index-module__contextChipRemove__BfKue:hover {
+      color: #4338ca;
+      background: #6366f11f;
+    }
+    .index-module__contextChipModel__mlo2l {
+      border-color: color-mix(in srgb, var(--fn-color-brand) 28%, transparent);
+      background: color-mix(in srgb, var(--fn-color-brand) 10%, transparent);
+    }
+    .index-module__contextChipModel__mlo2l
+      .index-module__contextChipIcon__w0QCM {
+      border-radius: 50%;
+      background: color-mix(in srgb, var(--fn-color-brand) 14%, transparent);
+      color: var(--fn-color-brand);
+    }
+    .index-module__contextChipModel__mlo2l
+      .index-module__contextChipLabel__vgQ2Q {
+      color: var(--fn-color-brand);
+    }
+    .index-module__imagePreviewBar__0j3bn {
+      display: flex;
+      gap: 8px;
+      padding: 8px 0 4px;
+      overflow-x: auto;
+      flex-shrink: 0;
+    }
+    .index-module__imagePreviewBar__0j3bn::-webkit-scrollbar {
+      height: 4px;
+    }
+    .index-module__imagePreviewBar__0j3bn::-webkit-scrollbar-thumb {
+      background: var(--fn-border-primary);
+      border-radius: 2px;
+    }
+    .index-module__userComposerTags__Ij1Zk {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      margin-bottom: 5px;
+      justify-content: flex-end;
+      opacity: 0.92;
+    }
+    :root {
+      --fn-border: #edf0f4;
+      --fn-bg-elevated: #fff;
+      --fn-text-primary: #182435;
+      --fn-text-secondary: #6f7b8d;
+      --fn-text-tertiary: #adb5c1;
+      --fn-primary: #4479ee;
+      --fn-font-mono: monospace;
+      --fn-radius-md: 8px;
+    }
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      background: #f4f6f9;
+      color: #1c293a;
+      font:
+        14px "Microsoft YaHei",
+        Arial,
+        sans-serif;
+    }
+    header {
+      padding: 20px 32px;
+      background: white;
+      border-bottom: 1px solid #e7ebf1;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    header b {
+      font-size: 20px;
+    }
+    header span {
+      color: #7b8797;
+      font-size: 12px;
+    }
+    .switch {
+      margin-left: auto;
+      border: 1px solid #f4abbc;
+      background: #fff4f7;
+      color: #df4869;
+      border-radius: 9px;
+      padding: 10px 16px;
+      cursor: pointer;
+    }
+    main {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      padding: 24px 30px;
+      max-width: 1440px;
+      margin: auto;
+    }
+    section {
+      min-width: 0;
+      border: 1px solid #e7ebf1;
+      background: white;
+      border-radius: 14px;
+      overflow: hidden;
+    }
+    h2 {
+      font-size: 14px;
+      font-weight: 600;
+      margin: 0;
+      padding: 18px 22px;
+      border-bottom: 1px solid #eff1f5;
+    }
+    .messages {
+      min-height: 415px;
+      padding: 26px 22px;
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+    }
+    .assistant,
+    .user {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+    }
+    .avatar {
+      font-size: 24px;
+      flex-shrink: 0;
+      background: #edf1f7;
+      border-radius: 50%;
+      width: 36px;
+      height: 36px;
+      text-align: center;
+      padding-top: 3px;
+    }
+    .answer {
+      background: #f7f8fa;
+      border-radius: 14px;
+      padding: 14px 16px;
+      line-height: 1.8;
+    }
+    small {
+      display: block;
+      color: #b6becc;
+      font-size: 10px;
+      margin-top: 7px;
+    }
+    .user {
+      justify-content: flex-end;
+    }
+    .user > div {
+      min-width: 0;
+    }
+    .user p {
+      background: #e9ebee;
+      border-radius: 16px 16px 6px 16px;
+      padding: 12px 14px;
+      margin: 0;
+      line-height: 1.7;
+    }
+    .user small {
+      text-align: right;
+    }
+    .composer {
+      position: relative;
+      margin: 15px 20px 20px;
+      padding: 6px 14px 10px;
+      border: 1px solid #fde2e8;
+      border-radius: 18px;
+      box-shadow: 0 3px 12px #202a4110;
+    }
+    textarea {
+      display: block;
+      border: 0;
+      resize: none;
+      outline: 0;
+      background: transparent;
+      color: #1c293a;
+      width: 100%;
+      height: 58px;
+      padding: 12px 0;
+      font:
+        15px "Microsoft YaHei",
+        Arial,
+        sans-serif;
+    }
+    textarea::placeholder {
+      color: #b9c1ce;
+    }
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border-top: 1px solid #faf0f3;
+      padding-top: 10px;
+    }
+    button {
+      font: inherit;
+    }
+    .toolbar > button {
+      position: relative;
+      border: 1px solid #edf0f4;
+      border-radius: 50%;
+      width: 35px;
+      height: 35px;
+      background: #f8f9fb;
+      color: #bbc2cd;
+      cursor: pointer;
+    }
+    .toolbar .add {
+      color: #3277fa;
+      background: #eaf1ff;
+      border-color: #b1c6ff;
+      font-size: 24px;
+    }
+    .add sup {
+      position: absolute;
+      right: -2px;
+      top: -5px;
+      background: #326dfa;
+      border: 2px solid white;
+      border-radius: 50%;
+      font-size: 10px;
+      color: white;
+      padding: 2px 4px;
+    }
+    .spacer {
+      flex: 1;
+    }
+    .toolbar .send {
+      background: #f4b7c5;
+      color: white;
+      border: 0;
+      border-radius: 11px;
+      font-size: 21px;
+    }
+    .picker {
+      position: absolute;
+      left: 10px;
+      bottom: 65px;
+      background: white;
+      border: 1px solid #edf0f4;
+      border-radius: 12px;
+      padding: 16px;
+      box-shadow: 0 8px 35px #17243320;
+      z-index: 2;
+    }
+    .picker label {
+      display: block;
+      margin-top: 12px;
+    }
+    .legend {
+      font-size: 12px;
+      color: #8490a1;
+      margin: 0 30px 22px;
+      text-align: center;
+    }
+    @media (max-width: 767px) {
+      header {
+        padding: 15px;
+      }
+      header span {
+        display: none;
+      }
+      main {
+        display: block;
+        padding: 15px;
+      }
+      section + section {
+        margin-top: 18px;
+      }
+      .messages {
+        min-height: 440px;
+        padding: 22px 14px;
+      }
+      .composer {
+        margin: 15px 12px;
+      }
+      .legend {
+        margin: 10px 15px;
+      }
+    }
+  </style>
+  <header>
+    <b>清爽对话界面</b
+    ><span>原生标签样式 · 隔离结构预览（非线上已安装截图）</span
+    ><button id="toggle" class="switch">查看优化后</button>
+  </header>
+  <main>
+    <section>
+      <h2>主对话</h2>
+      <div class="messages">
+        <div class="assistant">
+          <span class="avatar">🤖</span>
+          <div>
+            <div class="answer">
+              你好，连接正常。<br /><br />已经启用的 MCP 与知识库仍然可用。<br />这一版只减少标签显示，不改变对话内容。
+            </div>
+            <small>14:45　▢　♬</small>
+          </div>
+        </div>
+        <div class="user">
+          <div>
+            <div class="index-module__userComposerTags__Ij1Zk">
+              <div
+                class="index-module__contextChip__wUa3C index-module__contextChipConnector__-Lnvz index-module__contextChipCompact__9pizc"
+              >
+                <span class="index-module__contextChipIcon__w0QCM">♧</span
+                ><span class="index-module__contextChipLabel__vgQ2Q"
+                  >memorys</span
+                >
+              </div>
+              <div
+                class="index-module__contextChip__wUa3C index-module__contextChipKnowledge__uWnKd index-module__contextChipCompact__9pizc"
+              >
+                <span class="index-module__contextChipIcon__w0QCM">▣</span
+                ><span class="index-module__contextChipLabel__vgQ2Q"
+                  >我的知识库</span
+                >
+              </div>
+              <div
+                class="index-module__contextChip__wUa3C index-module__contextChipModel__mlo2l index-module__contextChipCompact__9pizc"
+              >
+                <span class="index-module__contextChipIcon__w0QCM">⚙</span
+                ><span class="index-module__contextChipLabel__vgQ2Q"
+                  >OpenAI / auto</span
+                >
+              </div>
+            </div>
+            <p>先隐藏这些标签，我看看效果怎么样。</p>
+            <small>14:46　▢</small>
+          </div>
+          <span class="avatar">🙋🏻</span>
+        </div>
+        <div class="assistant">
+          <span class="avatar">🤖</span>
+          <div>
+            <div class="answer">
+              MCP、知识库与模型标签统一隐藏。<br /><br />模型只在「＋」菜单内体现；侧聊不再显示「新建对话」。
+            </div>
+            <small>14:46　▢　♬</small>
+          </div>
+        </div>
+      </div>
+      <div class="composer">
+        <div class="index-module__imagePreviewBar__0j3bn">
+          <div
+            class="index-module__contextChip__wUa3C index-module__contextChipConnector__-Lnvz"
+          >
+            <span class="index-module__contextChipIcon__w0QCM">♧</span
+            ><span class="index-module__contextChipLabel__vgQ2Q">memorys</span
+            ><button
+              class="index-module__contextChipRemove__BfKue"
+              aria-label="取消"
+            >
+              ×
+            </button>
+          </div>
+          <div
+            class="index-module__contextChip__wUa3C index-module__contextChipConnector__-Lnvz"
+          >
+            <span class="index-module__contextChipIcon__w0QCM">♧</span
+            ><span class="index-module__contextChipLabel__vgQ2Q">飞书 CLI</span
+            ><button
+              class="index-module__contextChipRemove__BfKue"
+              aria-label="取消"
+            >
+              ×
+            </button>
+          </div>
+          <div
+            class="index-module__contextChip__wUa3C index-module__contextChipKnowledge__uWnKd"
+          >
+            <span class="index-module__contextChipIcon__w0QCM">▣</span
+            ><span class="index-module__contextChipLabel__vgQ2Q"
+              >我的知识库</span
+            ><button
+              class="index-module__contextChipRemove__BfKue"
+              aria-label="取消"
+            >
+              ×
+            </button>
+          </div>
+          <div class="index-module__contextChip__wUa3C index-module__contextChipModel__mlo2l"><span class="index-module__contextChipIcon__w0QCM">⚙</span><span class="index-module__contextChipLabel__vgQ2Q">OpenAI / auto</span></div>
+        </div>
+        <textarea placeholder="和 AI 小助手说点什么吧～"></textarea>
+        <div class="toolbar">
+          <button
+            class="add"
+            onclick="this.closest('.composer').querySelector('.picker').hidden=!this.closest('.composer').querySelector('.picker').hidden"
+          >
+            ＋<sup>3</sup></button
+          ><button>ϟ</button><button>♧</button><span class="spacer"></span
+          ><button>◷</button><button class="index-module__newChatBtn__LyNla" title="新建对话" aria-label="新建对话">⊞</button><button>☷</button><button>♬</button
+          ><button class="send">➤</button>
+        </div>
+        <div class="picker" hidden>
+          <b>资源选择入口仍然保留</b
+          ><label><input type="checkbox" checked />memorys</label
+          ><label><input type="checkbox" checked />飞书 CLI</label
+          ><label><input type="checkbox" checked />我的知识库</label><label>模型 <select aria-label="选择模型"><option value="auto">OpenAI / auto</option><option value="manual">OpenAI / 手动模型</option></select></label>
+        </div>
+      </div>
+    </section>
+    <section>
+      <aside class="SideChatPanel-module__panel__2n1RZ">
+      <h2>侧聊</h2>
+      <div class="messages">
+        <div class="assistant">
+          <span class="avatar">🤖</span>
+          <div>
+            <div class="answer">
+              你好，连接正常。<br /><br />已经启用的 MCP 与知识库仍然可用。<br />这一版只减少标签显示，不改变对话内容。
+            </div>
+            <small>14:45　▢　♬</small>
+          </div>
+        </div>
+        <div class="user">
+          <div>
+            <div class="index-module__userComposerTags__Ij1Zk">
+              <div
+                class="index-module__contextChip__wUa3C index-module__contextChipConnector__-Lnvz index-module__contextChipCompact__9pizc"
+              >
+                <span class="index-module__contextChipIcon__w0QCM">♧</span
+                ><span class="index-module__contextChipLabel__vgQ2Q"
+                  >memorys</span
+                >
+              </div>
+              <div
+                class="index-module__contextChip__wUa3C index-module__contextChipKnowledge__uWnKd index-module__contextChipCompact__9pizc"
+              >
+                <span class="index-module__contextChipIcon__w0QCM">▣</span
+                ><span class="index-module__contextChipLabel__vgQ2Q"
+                  >我的知识库</span
+                >
+              </div>
+              <div
+                class="index-module__contextChip__wUa3C index-module__contextChipModel__mlo2l index-module__contextChipCompact__9pizc"
+              >
+                <span class="index-module__contextChipIcon__w0QCM">⚙</span
+                ><span class="index-module__contextChipLabel__vgQ2Q"
+                  >OpenAI / auto</span
+                >
+              </div>
+            </div>
+            <p>先隐藏这些标签，我看看效果怎么样。</p>
+            <small>14:46　▢</small>
+          </div>
+          <span class="avatar">🙋🏻</span>
+        </div>
+        <div class="assistant">
+          <span class="avatar">🤖</span>
+          <div>
+            <div class="answer">
+              MCP、知识库与模型标签统一隐藏。<br /><br />模型只在「＋」菜单内体现；侧聊不再显示「新建对话」。
+            </div>
+            <small>14:46　▢　♬</small>
+          </div>
+        </div>
+      </div>
+      <div class="composer">
+        <div class="index-module__imagePreviewBar__0j3bn">
+          <div
+            class="index-module__contextChip__wUa3C index-module__contextChipConnector__-Lnvz"
+          >
+            <span class="index-module__contextChipIcon__w0QCM">♧</span
+            ><span class="index-module__contextChipLabel__vgQ2Q">memorys</span
+            ><button
+              class="index-module__contextChipRemove__BfKue"
+              aria-label="取消"
+            >
+              ×
+            </button>
+          </div>
+          <div
+            class="index-module__contextChip__wUa3C index-module__contextChipConnector__-Lnvz"
+          >
+            <span class="index-module__contextChipIcon__w0QCM">♧</span
+            ><span class="index-module__contextChipLabel__vgQ2Q">飞书 CLI</span
+            ><button
+              class="index-module__contextChipRemove__BfKue"
+              aria-label="取消"
+            >
+              ×
+            </button>
+          </div>
+          <div
+            class="index-module__contextChip__wUa3C index-module__contextChipKnowledge__uWnKd"
+          >
+            <span class="index-module__contextChipIcon__w0QCM">▣</span
+            ><span class="index-module__contextChipLabel__vgQ2Q"
+              >我的知识库</span
+            ><button
+              class="index-module__contextChipRemove__BfKue"
+              aria-label="取消"
+            >
+              ×
+            </button>
+          </div>
+          <div class="index-module__contextChip__wUa3C index-module__contextChipModel__mlo2l"><span class="index-module__contextChipIcon__w0QCM">⚙</span><span class="index-module__contextChipLabel__vgQ2Q">OpenAI / auto</span></div>
+        </div>
+        <textarea placeholder="和 AI 小助手说点什么吧～"></textarea>
+        <div class="toolbar">
+          <button
+            class="add"
+            onclick="this.closest('.composer').querySelector('.picker').hidden=!this.closest('.composer').querySelector('.picker').hidden"
+          >
+            ＋<sup>3</sup></button
+          ><button>ϟ</button><button>♧</button><span class="spacer"></span
+          ><button>◷</button><button class="index-module__newChatBtn__LyNla" title="新建对话" aria-label="新建对话">⊞</button><button>☷</button><button>♬</button
+          ><button class="send">➤</button>
+        </div>
+        <div class="picker" hidden>
+          <b>资源选择入口仍然保留</b
+          ><label><input type="checkbox" checked />memorys</label
+          ><label><input type="checkbox" checked />飞书 CLI</label
+          ><label><input type="checkbox" checked />我的知识库</label><label>模型 <select aria-label="选择模型"><option value="auto">OpenAI / auto</option><option value="manual">OpenAI / 手动模型</option></select></label>
+        </div>
+      </div>
+      </aside>
+    </section>
+  </main>
+  <p class="legend">
+    v0.1.1 · 隐藏 MCP / 知识库 / 模型标签及侧聊新建按钮 · 模型只在＋菜单显示 · 保留主聊新建按钮
+  </p>
+  <script type="module">
+// Hand-authored, self-contained ESM. No React or build dependencies.
+const PLUGIN_ID = "clean-chat-ui";
+const STYLE_ID = "octop-clean-chat-ui-style";
+const classToken = (name) =>
+  `:is([class^="index-module__${name}__"], [class*=" index-module__${name}__"])`;
+const rows = `:is(${classToken("imagePreviewBar")}, ${classToken("userComposerTags")})`;
+const hiddenChip = `:is(${classToken("contextChipConnector")}, ${classToken("contextChipKnowledge")}, ${classToken("contextChipModel")})`;
+const sidePanel = ":is(aside[class^=\"SideChatPanel-module__panel__\"], aside[class*=\" SideChatPanel-module__panel__\"])";
+const css = `
+/* Hide MCP, knowledge-base and model chips in the composer and message history.
+   The model selection inside the + menu stays untouched. */
+${rows} > ${hiddenChip} { display: none !important; }
+/* Remove only the side-chat composer new-conversation button. */
+${sidePanel} button${classToken("newChatBtn")} { display: none !important; }
+/* Collapse rows whose remaining direct children are all hidden targets. */
+${rows}:not(:has(> :not(${hiddenChip}))) { display: none !important; }
+`;
+
+export function setup(host) {
+  // The current loader also imports globally disabled plugins. Check the real
+  // catalog before applying CSS, and replace stale styles on loader resets.
+  document.getElementById(STYLE_ID)?.remove();
+  const style = document.createElement("style");
+  style.id = STYLE_ID;
+  document.head.append(style);
+  host.request("/plugins").then((plugins) => {
+    if (!style.isConnected) return; // A newer setup owns the page now.
+    const plugin = plugins.find((item) => item.id === PLUGIN_ID);
+    if (plugin && plugin.enabled !== false && !plugin.error) {
+      style.textContent = css;
+    } else {
+      style.remove();
+    }
+  }).catch((error) => {
+    style.remove(); // Fail open: leave the native UI visible on auth/network errors.
+    console.warn("[clean-chat-ui] Could not check plugin status; labels remain visible.", error);
+  });
+}
+    let enabled = false;
+    const toggle = document.getElementById("toggle");
+    toggle.onclick = () => {
+      enabled = !enabled;
+      setup({
+        request: () => Promise.resolve([{ id: "clean-chat-ui", enabled }]),
+      });
+      toggle.textContent = enabled ? "当前：优化后 · 查看原界面" : "查看优化后";
+    };
+    // Fixture-only model selector: demonstrate changing a native-style chip without disabling selection.
+    document.querySelectorAll(".picker select").forEach((select) => {
+      select.onchange = () => {
+        const chip = select.closest(".composer").querySelector("[class*=\"__contextChipModel__\"] [class*=\"__contextChipLabel__\"]");
+        chip.textContent = select.selectedOptions[0].textContent;
+      };
+    });
+    window.previewSetup = setup;
+  </script>
+</html>

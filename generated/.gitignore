@@ -1,0 +1,4 @@
+# Keep the reusable plugin; exclude deployment snapshots and scratch verification trees.
+/*
+!/.gitignore
+!/clean-chat-ui/

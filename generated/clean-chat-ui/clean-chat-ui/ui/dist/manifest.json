@@ -1,0 +1,6 @@
+{
+  "id": "clean-chat-ui",
+  "version": "0.1.1",
+  "entry": "index.js",
+  "renderers": []
+}

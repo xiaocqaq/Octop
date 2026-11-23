@@ -103,6 +103,41 @@ async def test_list_bases_discovers_only_visible_ids(services: SimpleNamespace) 
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "hitl",
+    [
+        None,
+        {"enabled": False, "tools": ["create_knowledge_base"]},
+        {"enabled": True, "tools": "default"},
+        {"enabled": True, "tools": ["write_file"]},
+        {"enabled": True, "tools": []},
+    ],
+)
+async def test_knowledge_write_follows_global_approval_settings(
+    services: SimpleNamespace, hitl: dict[str, Any] | None
+) -> None:
+    if hitl is not None:
+        services.settings_repo.set("security_policy", json.dumps({"hitl": hitl}))
+    tool = _tools(services)["create_knowledge_base"]
+    builder = StateGraph(MessagesState)
+    builder.add_node("tools", ToolNode([tool]))
+    builder.set_entry_point("tools")
+    builder.add_edge("tools", END)
+    graph = builder.compile(checkpointer=InMemorySaver())
+    request = AIMessage(
+        content="",
+        tool_calls=[{"id": "create", "name": tool.name, "args": {"name": "Notes"}}],
+    )
+    result = await graph.ainvoke(
+        {"messages": [request]},
+        {"configurable": {"thread_id": "global-approval", "user": services.owner}},
+    )
+    assert "__interrupt__" not in result
+    assert json.loads(result["messages"][-1].content)["status"] == "created"
+    assert [base.name for base in services.knowledge_repo.list_all()] == ["Notes"]
+
+
+@pytest.mark.asyncio
 async def test_create_base_uses_trusted_user(
     services: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -162,12 +197,16 @@ async def test_no_trusted_user_cannot_request_approval(
 async def test_rejecting_base_creation_leaves_database_untouched(
     services: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def reject(name: str, args: dict[str, Any]) -> bool:
+    def reject(name: str, args: dict[str, Any], **_kwargs: Any) -> bool:
         assert name == "create_knowledge_base"
         assert args == {"name": "Rejected", "description": "Draft"}
         return False
 
     monkeypatch.setattr("octop.infra.knowledge.approval.require_knowledge_write_approval", reject)
+    services.settings_repo.set(
+        "security_policy",
+        json.dumps({"hitl": {"enabled": True, "tools": ["create_knowledge_base"]}}),
+    )
     tool = _tools(services)["create_knowledge_base"]
     with _trusted(user=services.owner, locale="zh"):
         result = await _call(tool, name="Rejected", description="Draft")
@@ -463,6 +502,18 @@ async def test_graph_interrupt_gates_document_persistence(
     services: SimpleNamespace,
     index_queue: list[tuple[str, str]],
 ) -> None:
+    services.settings_repo.set(
+        "security_policy",
+        json.dumps(
+            {
+                "hitl": {
+                    "enabled": True,
+                    "tools": ["create_knowledge_document"],
+                    "allowed_decisions": ["reject", "approve"],
+                }
+            }
+        ),
+    )
     svc = KnowledgeService(services)
     base = svc.create_base(owner_user_id=services.owner, name="Approval")
     tool = _tools(services)["create_knowledge_document"]
@@ -479,7 +530,11 @@ async def test_graph_interrupt_gates_document_persistence(
             content="", tool_calls=[{"id": decision, "name": tool.name, "args": args}]
         )
         paused = await graph.ainvoke({"messages": [request]}, config)
-        assert paused["__interrupt__"][0].value["action_requests"][0]["name"] == tool.name
+        review = paused["__interrupt__"][0].value
+        assert review["action_requests"][0]["name"] == tool.name
+        assert review["review_configs"] == [
+            {"action_name": tool.name, "allowed_decisions": ["reject", "approve"]}
+        ]
         assert services.knowledge_repo.list_documents(base.id) == []
         assert index_queue == []
         output = await graph.ainvoke(Command(resume={"decisions": [{"type": decision}]}), config)
@@ -544,6 +599,10 @@ async def test_create_agent_parallel_knowledge_approvals(
     monkeypatch.setattr(LangGraphProtocol, "_project_chunk", LangGraphProtocol._project_chunk)
     monkeypatch.setattr(stream_compat, "_INSTALLED", stream_compat._INSTALLED)
     stream_compat.install_harness_hitl_compat()
+    services.settings_repo.set(
+        "security_policy",
+        json.dumps({"hitl": {"enabled": True, "tools": ["create_knowledge_document"]}}),
+    )
     svc = KnowledgeService(services)
     base = svc.create_base(owner_user_id=services.owner, name="Parallel")
     other = svc.create_base(owner_user_id=services.reader, name="Other", shared=True)

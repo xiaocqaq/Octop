@@ -1,4 +1,4 @@
-"""Per-call human approval for knowledge mutations, independent of security bypasses."""
+"""In-tool approval for knowledge mutations selected by the global security policy."""
 
 from __future__ import annotations
 
@@ -20,19 +20,27 @@ KNOWLEDGE_WRITE_INTERRUPT_CONFIG = {
 }
 
 
-def require_knowledge_write_approval(name: str, args: dict[str, Any]) -> bool:
-    """Pause within the tool, including bootstrap, before any knowledge write.
+def require_knowledge_write_approval(
+    name: str, args: dict[str, Any], *, interrupt_config: dict[str, Any] | None = None
+) -> bool:
+    """Pause a policy-selected write within the tool, including during bootstrap.
 
-    Keep this gate inside the mutation coroutine: the harness only mounts its
-    configurable tool gate after bootstrap. Each tool call needs its own decision.
+    The caller resolves the global policy before entering this gate. Keeping it
+    inside the mutation coroutine also covers the bootstrap graph.
     """
-    config = KNOWLEDGE_WRITE_INTERRUPT_CONFIG[name]
+    config = (
+        interrupt_config if interrupt_config is not None else KNOWLEDGE_WRITE_INTERRUPT_CONFIG[name]
+    )
+    # This in-tool gate authorizes the original args; edit/respond are unsupported.
+    allowed_decisions = [
+        decision for decision in config["allowed_decisions"] if decision in {"approve", "reject"}
+    ]
+    if not allowed_decisions:
+        return False
     response = interrupt(
         {
             "action_requests": [{"name": name, "args": args}],
-            "review_configs": [
-                {"action_name": name, "allowed_decisions": list(config["allowed_decisions"])}
-            ],
+            "review_configs": [{"action_name": name, "allowed_decisions": allowed_decisions}],
         }
     )
     if not isinstance(response, dict):
@@ -43,4 +51,5 @@ def require_knowledge_write_approval(name: str, args: dict[str, Any]) -> bool:
         and len(decisions) == 1
         and isinstance(decisions[0], dict)
         and decisions[0].get("type") == "approve"
+        and "approve" in allowed_decisions
     )
