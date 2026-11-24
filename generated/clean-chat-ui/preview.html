@@ -383,15 +383,39 @@
       border-radius: 50%;
       width: 35px;
       height: 35px;
-      background: #f8f9fb;
+      background: var(--fn-bg-secondary);
       color: #bbc2cd;
       cursor: pointer;
     }
-    .toolbar .add {
-      color: #3277fa;
-      background: #eaf1ff;
-      border-color: #b1c6ff;
-      font-size: 24px;
+    :root {
+      --fn-bg-secondary: #f8f9fb;
+      --fn-text-quaternary: #bbc2cd;
+      --fn-text-brand: #3277fa;
+      --fn-color-brand-bg: #eaf1ff;
+      --fn-color-brand: #3277fa;
+    }
+    .toolbar .add { font-size: 24px; }
+    .toolbar > button[class*="__secondaryBtn__"] {
+      border: 1px solid #edf0f4;
+      background: var(--fn-bg-secondary);
+      color: var(--fn-text-quaternary);
+    }
+    .toolbar > button[class*="__secondaryBtn__"]:hover {
+      color: var(--fn-text-brand);
+      background: var(--fn-color-brand-bg);
+    }
+    .toolbar > button[class*="__secondaryBtn__"]:focus-visible {
+      outline: 2px solid var(--fn-color-brand);
+      outline-offset: 2px;
+    }
+    [class*="__secondaryBtnActive__"] {
+      color: #2563eb !important;
+      background: rgba(37, 99, 235, 0.12) !important;
+      box-shadow: inset 0 0 0 1.5px rgba(37, 99, 235, 0.35);
+    }
+    [class*="__secondaryBtnActive__"]:hover {
+      color: #1d4ed8 !important;
+      background: rgba(37, 99, 235, 0.18) !important;
     }
     .add sup {
       position: absolute;
@@ -518,10 +542,12 @@
             <div class="answer">
               MCP、知识库与模型标签统一隐藏。<br /><br />模型只在「＋」菜单内体现；侧聊不再显示「新建对话」。
             </div>
-            <small>14:46　▢　♬</small>
+            <small>14:46　<button aria-label="复制回答">▢</button>　<button aria-label="朗读回答">♬</button></small>
+            <span class="index-module__msgUsage__fixture" data-usage="120/100/20/140">耗时 2秒 · 120 输入 / 100 缓存命中 / 20 输出 / 140 总计</span>
           </div>
         </div>
       </div>
+      <div class="index-module__runUsageBar__fixture" data-usage="81834/50944/538/82372">本会话累计: 81834 输入 / 50944 缓存命中 (62%) / 538 输出 / 82372 总计</div>
       <div class="composer">
         <div class="index-module__imagePreviewBar__0j3bn">
           <div
@@ -566,15 +592,16 @@
         <textarea placeholder="和 AI 小助手说点什么吧～"></textarea>
         <div class="toolbar">
           <button
-            class="add"
+            class="add index-module__secondaryBtn__fixture index-module__secondaryBtnActive__fixture"
+            data-testid="composer-plus" aria-label="更多工具"
             onclick="this.closest('.composer').querySelector('.picker').hidden=!this.closest('.composer').querySelector('.picker').hidden"
           >
-            ＋<sup>3</sup></button
+            ＋<sup class="index-module__toolbarBadge__fixture">3</sup></button
           ><button>ϟ</button><button>♧</button><span class="spacer"></span
-          ><button>◷</button><button class="index-module__newChatBtn__LyNla" title="新建对话" aria-label="新建对话">⊞</button><button>☷</button><button>♬</button
+          ><button class="index-module__contextRingBtn__fixture" aria-label="上下文 Token 用量">3%</button><button class="index-module__newChatBtn__LyNla" title="新建对话" aria-label="新建对话">⊞</button><button>☷</button><button>♬</button
           ><button class="send">➤</button>
         </div>
-        <div class="picker" hidden>
+        <div class="picker octop-popover" role="tooltip" hidden>
           <b>资源选择入口仍然保留</b
           ><label><input type="checkbox" checked />memorys</label
           ><label><input type="checkbox" checked />飞书 CLI</label
@@ -634,10 +661,12 @@
             <div class="answer">
               MCP、知识库与模型标签统一隐藏。<br /><br />模型只在「＋」菜单内体现；侧聊不再显示「新建对话」。
             </div>
-            <small>14:46　▢　♬</small>
+            <small>14:46　<button aria-label="复制回答">▢</button>　<button aria-label="朗读回答">♬</button></small>
+            <span class="index-module__msgUsage__fixture" data-usage="120/100/20/140">耗时 2秒 · 120 输入 / 100 缓存命中 / 20 输出 / 140 总计</span>
           </div>
         </div>
       </div>
+      <div class="index-module__runUsageBar__fixture" data-usage="81834/50944/538/82372">本会话累计: 81834 输入 / 50944 缓存命中 (62%) / 538 输出 / 82372 总计</div>
       <div class="composer">
         <div class="index-module__imagePreviewBar__0j3bn">
           <div
@@ -682,15 +711,16 @@
         <textarea placeholder="和 AI 小助手说点什么吧～"></textarea>
         <div class="toolbar">
           <button
-            class="add"
+            class="add index-module__secondaryBtn__fixture index-module__secondaryBtnActive__fixture"
+            data-testid="composer-plus" aria-label="更多工具"
             onclick="this.closest('.composer').querySelector('.picker').hidden=!this.closest('.composer').querySelector('.picker').hidden"
           >
-            ＋<sup>3</sup></button
+            ＋<sup class="index-module__toolbarBadge__fixture">3</sup></button
           ><button>ϟ</button><button>♧</button><span class="spacer"></span
-          ><button>◷</button><button class="index-module__newChatBtn__LyNla" title="新建对话" aria-label="新建对话">⊞</button><button>☷</button><button>♬</button
+          ><button class="index-module__contextRingBtn__fixture" aria-label="上下文 Token 用量">3%</button><button class="index-module__newChatBtn__LyNla" title="新建对话" aria-label="新建对话">⊞</button><button>☷</button><button>♬</button
           ><button class="send">➤</button>
         </div>
-        <div class="picker" hidden>
+        <div class="picker octop-popover" role="tooltip" hidden>
           <b>资源选择入口仍然保留</b
           ><label><input type="checkbox" checked />memorys</label
           ><label><input type="checkbox" checked />飞书 CLI</label
@@ -701,8 +731,15 @@
     </section>
   </main>
   <p class="legend">
-    v0.1.1 · 隐藏 MCP / 知识库 / 模型标签及侧聊新建按钮 · 模型只在＋菜单显示 · 保留主聊新建按钮
+    v0.1.4 · 隐藏标签与数字角标 · ＋不再突出选中态 · 手机隐藏悬浮提示 · 保留菜单与主聊新建按钮
   </p>
+  <!-- Ant Design portals live outside the React root; Popover can share role="tooltip". -->
+  <div id="octop-stage">
+    <div class="octop-tooltip octop-tooltip-placement-top"><div class="octop-tooltip-inner" role="tooltip">更多工具</div></div>
+    <div class="octop-tooltip octop-tooltip-placement-bottom"><div class="octop-tooltip-inner" role="tooltip">新建对话</div></div>
+    <div id="preserved-popover" class="octop-popover"><div role="tooltip">菜单内容仍可使用</div></div>
+    <div class="fakeoctop-tooltip">相似类名保留</div>
+  </div>
   <script type="module">
 // Hand-authored, self-contained ESM. No React or build dependencies.
 const PLUGIN_ID = "clean-chat-ui";
@@ -713,6 +750,28 @@ const rows = `:is(${classToken("imagePreviewBar")}, ${classToken("userComposerTa
 const hiddenChip = `:is(${classToken("contextChipConnector")}, ${classToken("contextChipKnowledge")}, ${classToken("contextChipModel")})`;
 const sidePanel = ":is(aside[class^=\"SideChatPanel-module__panel__\"], aside[class*=\" SideChatPanel-module__panel__\"])";
 const css = `
+/* Hide chat token-usage indicators without changing collected usage data. */
+${classToken("runUsageBar")},
+${classToken("msgUsage")},
+${classToken("contextRingBtn")} { display: none !important; }
+/* Hide only the numeric badge on the composer + button. */
+${classToken("toolbarBadge")} { display: none !important; }
+/* Selection should not tint the + button; retain ordinary desktop hover and focus. */
+button[data-testid="composer-plus"]${classToken("secondaryBtnActive")} {
+  color: var(--fn-text-quaternary) !important;
+  background: var(--fn-bg-secondary) !important;
+  box-shadow: none !important;
+}
+@media (hover: hover) and (pointer: fine) {
+  button[data-testid="composer-plus"]${classToken("secondaryBtnActive")}:hover {
+    color: var(--fn-text-brand) !important;
+    background: var(--fn-color-brand-bg) !important;
+  }
+}
+/* Hide mobile hover hints, not Popover menus (which may also use role="tooltip"). */
+@media (max-width: 767px), (hover: none) and (pointer: coarse) {
+  .octop-tooltip { display: none !important; }
+}
 /* Hide MCP, knowledge-base and model chips in the composer and message history.
    The model selection inside the + menu stays untouched. */
 ${rows} > ${hiddenChip} { display: none !important; }

@@ -5,7 +5,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 root = Path(__file__).resolve().parent
 plugin = root / "clean-chat-ui"
-archive = root / "clean-chat-ui-0.1.1.zip"
+archive = root / "clean-chat-ui-0.1.4.zip"
 files = ["plugin.yaml", "main.py", "README.md", "ui/dist/index.js", "ui/dist/manifest.json"]
 with ZipFile(archive, "w", compression=ZIP_DEFLATED) as package:
     for file in files:

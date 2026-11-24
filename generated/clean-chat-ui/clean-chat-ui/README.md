@@ -1,10 +1,12 @@
-# 清爽对话界面 0.1.1（预览版）
+# 清爽对话界面 0.1.4（预览版）
 
-隐藏主聊/侧聊输入框与用户消息上方的 MCP、知识库和模型标签（例如 OpenAI / auto），并收起只剩这些标签的空行。手动切换后的模型不显示在输入框上方，仍在原有「＋」菜单内选择和查看。另隐藏侧聊输入区的「新建对话」按钮，主对话的同名按钮不受影响。技能、专家、附件、上传进度、侧聊保存/收起/关闭和发送保持原样；资源依然启用，模型设置、发送上下文与历史数据不会被改写。隐藏标签也隐藏其快捷删除按钮，仍可通过「＋」菜单选择或取消资源。
+隐藏主聊/侧聊输入框与用户消息上方的 MCP、知识库和模型标签（例如 OpenAI / auto），隐藏「＋」按钮上的数字角标，将其资源已选中时的背景恢复为同排普通按钮使用的 `--fn-bg-secondary`（浅色主题为浅灰底），去掉蓝色强调色与内阴影，并收起只剩这些标签的空行。手机界面屏蔽「更多工具」等按钮悬浮提示；原有点击菜单与按钮功能保留，鼠标桌面保留普通悬停效果和键盘焦点。手动切换后的模型不显示在输入框上方，仍在原有「＋」菜单内选择和查看。另隐藏侧聊输入区的「新建对话」按钮，主对话的同名按钮不受影响。技能、专家、附件、上传进度、侧聊保存/收起/关闭和发送保持原样；资源依然启用，模型设置、发送上下文与历史数据不会被改写。隐藏标签也隐藏其快捷删除按钮，仍可通过「＋」菜单选择或取消资源。
+
+同时隐藏会话累计 Token（输入、输出、缓存命中、总计）、消息下方用量行和上下文占用环。当前消息用量行也包含耗时，因此该行的耗时会一起隐藏；消息时间、复制和朗读操作保留。只改变聊天页显示，后台采集、历史用量和计费不变，设置或管理页的统计不受影响。当前版本没有对应的显示设置；模型高级选项 `stream_usage` 控制流式用量回传，并非界面开关，不需要为隐藏界面而关闭。
 
 ## 安装与恢复
 
-在 Octop 管理后台的插件管理中上传 `clean-chat-ui-0.1.1.zip`（需要管理员权限），安装后刷新聊天页面。也可使用 `octop plugin install ./clean-chat-ui-0.1.1.zip`；CLI 安装后按平台正常流程重载插件，再刷新页面。无需 npm install、构建前端或注册 AI 工具。请先在测试环境安装。
+在 Octop 管理后台的插件管理中上传 `clean-chat-ui-0.1.4.zip`（需要管理员权限），安装后刷新聊天页面。也可使用 `octop plugin install ./clean-chat-ui-0.1.4.zip`；CLI 安装后按平台正常流程重载插件，再刷新页面。无需 npm install、构建前端或注册 AI 工具。请先在测试环境安装。
 
 - 使用插件管理中的**全局开关**启停。本插件会读取已安装插件列表中的全局 enabled 状态；每次 UI setup 都先清除旧样式，禁用后重新加载或刷新即可恢复。
 - **卸载后必须刷新页面**；现有加载器不会清理 UI 的 DOM 副作用。其他已打开页面也需要刷新。
@@ -12,7 +14,7 @@
 
 ## 实现边界
 
-当前正式 UI host 面向工具结果渲染，没有全局外观注册或 disposer 接口。这一版通过合法插件 ESM 的 setup 注入一个自有 style，不修改核心。它依赖目前 CSS Modules 类名的 `index-module__imagePreviewBar__`、`index-module__userComposerTags__` 与 connector/knowledge/model variant，以及 `SideChatPanel-module__panel__` 下的 `index-module__newChatBtn__` 按钮，忽略 hash 后缀。升级后若类名/结构改变，需要更新适配；不是官方稳定外观扩展 API。
+当前正式 UI host 面向工具结果渲染，没有全局外观注册或 disposer 接口。这一版通过合法插件 ESM 的 setup 注入一个自有 style，不修改核心。它依赖目前 CSS Modules 类名的 `index-module__imagePreviewBar__`、`index-module__userComposerTags__` 与 connector/knowledge/model variant，`index-module__toolbarBadge__` 数字角标，以及 `SideChatPanel-module__panel__` 下的 `index-module__newChatBtn__` 按钮，忽略 hash 后缀。Token 显示匹配 `index-module__runUsageBar__`、`index-module__msgUsage__` 和 `index-module__contextRingBtn__`。另通过 `data-testid="composer-plus"` 与激活类匹配「＋」按钮，手机提示使用当前 Ant Design 前缀 `.octop-tooltip`，不隐藏 `.octop-popover` 菜单。手机条件是宽度 ≤767px 或主指针为无悬停的粗指针（覆盖手机横屏；桌面窄窗口也按移动界面处理）。仅屏蔽组件 Tooltip，不移除浏览器原生 `title` 或可访问性标签。升级后若类名/结构改变，需要更新适配；不是官方稳定外观扩展 API。
 
 异步加载及状态核对前标签可能短暂可见。状态核对失败时保留原生标签。现代 Chromium、Firefox、Safari 支持用于空行收起的 CSS :has()；旧浏览器可能只隐藏标签而留少量空白。
 
