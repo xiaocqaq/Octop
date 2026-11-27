@@ -16,7 +16,7 @@ from typing import Any, Protocol
 from langchain_core.messages import HumanMessage
 
 from octop.infra.agents.providers.model_flags import is_chat_eligible_model, is_vision_model
-from octop.infra.agents.providers.probe import build_probe_chat_model
+from octop.infra.agents.providers.probe import build_knowledge_chat_model
 from octop.infra.utils.llm_text import llm_text_content
 from octop.infra.utils.runtime_packages import PackageInstallSpec, install_packages
 
@@ -330,7 +330,7 @@ def _extract_local(path: Path) -> str:
 
 class _RemoteOcr:
     def __init__(self, provider: Any, model_id: str) -> None:
-        self._model = build_probe_chat_model(provider, model_id=model_id)
+        self._model = build_knowledge_chat_model(provider, model_id=model_id)
 
     def __call__(self, path: Path) -> str:
         parts: list[str] = []

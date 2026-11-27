@@ -8,7 +8,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage
 
 from octop.infra.agents.providers.model_flags import is_chat_eligible_model
-from octop.infra.agents.providers.probe import build_probe_chat_model
+from octop.infra.agents.providers.probe import build_knowledge_chat_model
 from octop.infra.knowledge.graph_store import ChunkEntity, ChunkGraph, ChunkRelation, entity_key
 from octop.infra.utils.llm_text import llm_text_content
 
@@ -207,7 +207,7 @@ class GraphExtractor:
         if not capability["usable"]:
             raise RuntimeError("knowledge graph extraction is not ready")
         provider = _provider(services.provider_repo, capability["provider_id"])
-        self._model = build_probe_chat_model(provider, model_id=capability["model"])
+        self._model = build_knowledge_chat_model(provider, model_id=capability["model"])
 
     def __call__(self, *, filename: str, ordinal: int, text: str) -> ChunkGraph:
         prompt = _PROMPT.format(

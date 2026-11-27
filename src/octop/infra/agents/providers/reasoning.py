@@ -147,7 +147,7 @@ def _selected_reasoning(
     selected_mode = (mode or capability.get("default_mode") or "auto").strip().lower()
     if selected_mode not in REASONING_MODES:
         selected_mode = "auto"
-    if not capability.get("toggle", True) and selected_mode == "disabled":
+    if not capability.get("toggle", True):
         selected_mode = "enabled"
 
     allowed_efforts = set(_string_list(capability.get("efforts")))
@@ -235,9 +235,35 @@ def reasoning_request_parameters(
     return overrides
 
 
+def apply_reasoning_overrides[ModelT](
+    model: ModelT, overrides: dict[str, dict[str, Any]]
+) -> ModelT:
+    """Configure a copy for this request without changing the shared model."""
+    if not overrides or not hasattr(model, "model_copy"):
+        return model
+    updates = dict(overrides.get("model_fields") or {})
+    extra = overrides.get("extra_body")
+    if isinstance(extra, dict) and extra and hasattr(model, "extra_body"):
+        current = dict(getattr(model, "extra_body", None) or {})
+        current.update(extra)
+        updates["extra_body"] = current
+    if not updates:
+        return model
+    configured: ModelT = model.model_copy(update=updates)
+    fallback = getattr(model, "_harness_api_fallback_model", None)
+    if fallback is not None:
+        object.__setattr__(
+            configured,
+            "_harness_api_fallback_model",
+            apply_reasoning_overrides(fallback, overrides),
+        )
+    return configured
+
+
 __all__ = [
     "EFFORT_TYPES",
     "REASONING_ADAPTERS",
+    "apply_reasoning_overrides",
     "reasoning_capability",
     "reasoning_request_parameters",
 ]

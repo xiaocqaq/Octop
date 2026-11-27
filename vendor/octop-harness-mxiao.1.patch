@@ -1,0 +1,1431 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -6,6 +6,14 @@
+ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+ 
+ ## [Unreleased]
++
++## [1.0.13+mxiao.1] - 2026-11-27
++
++### Custom distribution
++
++- Rebase every 1.0.11+mxiao.3 customization onto upstream 1.0.13 without replacing upstream improvements.
++- Preserve OpenAI-compatible Images generation and multipart edits, response validation and retries, read-only effective history snapshots, and parallel HITL aggregation/resume with checkpoint activity guards.
++- Retain the corresponding regression tests and host integration documentation.
+ 
+ ## [1.0.13] - 2026-11-26
+ 
+diff --git a/README.md b/README.md
+--- a/README.md
++++ b/README.md
+@@ -87,8 +87,18 @@
+ 
+ #### Agent runtime
+ - `HarnessAgentManager` — a registry that creates, lists, and streams many agents in one process.
+-- `HarnessAgent` — exposes `call`, `stream`, `stream_events`, `aget_history`, `aappend_messages`, and `cancel`.
++- `HarnessAgent` — exposes `call`, `stream`, `stream_events`, `aget_history`, `aget_effective_messages`, `aappend_messages`, and `cancel`.
+ - Checkpointing via LangGraph `AsyncSqliteSaver` (or a octop-memory saver) for resumable chats.
++
++Use `aget_effective_messages(thread_id)` to seed an independent conversation from the source thread's current context. It returns deep-copied conversation messages without history pagination: the current summary plus retained tail after compaction, or all messages before compaction. Unlike copying raw checkpoint `messages`, this preserves the context selected by the runtime's summarization middleware.
++
++```python
++messages = await agent.aget_effective_messages("source-thread")
++if messages:
++    await agent.aappend_messages("new-thread", messages)
++```
++
++Only messages are transferred; task state, `_summarization_event`, `_summarization_session_id`, offload identity, and workspace files are not cloned. Each thread can continue independently. Empty history or disabled checkpointing returns `[]`; checkpoint read failures propagate. Busy streams, pending graph execution, and HITL/approval sources raise `RuntimeError`. The host must serialize source invocations against snapshot creation, including its own busy checks.
+ 
+ #### Model routing & providers
+ - `ChatModelFactory` resolves a model name to the right client.
+@@ -216,7 +226,7 @@
+ terminating the agent stream.
+ 
+ For separate image and video routes, configure named providers. Built-in adapters cover Volcengine Ark
+-(Seedream/Seedance), Alibaba Cloud Model Studio (Wan), and MiniMax (image-01/H3):
++(Seedream/Seedance), Alibaba Cloud Model Studio (Wan), MiniMax (image-01/H3), and OpenAI Images (GPT Image):
+ 
+ ```python
+ from octop_harness import HarnessAgentConfig, MediaGenerationConfig, MediaProviderConfig
+@@ -244,6 +254,23 @@
+ )
+ ```
+ 
++For OpenAI Images, use the `openai_images` protocol with `OPENAI_API_KEY` (or an injected `api_key`):
++
++```python
++images = MediaProviderConfig(id="openai-images", provider="openai_images")
++# Defaults: https://api.openai.com/v1 and gpt-image-2.
++# Use images in MediaGenerationConfig(providers=[images, ...]) alongside a video provider.
++```
++
++`OpenAIImagesMediaProvider` sends text-only requests to `/images/generations` and reference-image edits
++to `/images/edits` as multipart uploads. Local paths, HTTP(S) URLs, and base64 data URLs are supported
++as references; edits accept up to 16 PNG, JPEG, or WebP images (each must satisfy OpenAI's 50 MB limit).
++GPT Image base64 responses are decoded into normal workspace image artifacts. The adapter requests PNG
++output and forwards prompt, count, and optional size; shared seed and watermark options are not forwarded.
++It automatically disables video in both single-provider and named-provider configuration; selecting it
++for video is rejected, while other providers keep their video routes. Low-level `MediaManager.add_provider`
++callers must pass `video_enabled=False` when registering this adapter.
++
+ Advanced hosts can inject a `MediaManager` into `build_media_generation_tools` and register a constrained
+ custom adapter without adding arbitrary protocol or authentication fields to declarative configuration.
+ 
+@@ -263,7 +290,7 @@
+ 
+ ## How to Use
+ 
+-Current release: **1.0.13**. See the [release notes](CHANGELOG.md).
++Current custom distribution: **1.0.13+mxiao.1** (upstream **1.0.13**). See the [release notes](CHANGELOG.md).
+ 
+ ### Prerequisites
+ - **Python 3.12+**
+diff --git a/pyproject.toml b/pyproject.toml
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -5,7 +5,7 @@
+ [project]
+ name = "octop-harness"
+ # Single source of truth for the package version (runtime reads via importlib.metadata).
+-version = "1.0.13"
++version = "1.0.13+mxiao.1"
+ description = "Production-grade Harness Agent built on top of LangChain Deep Agents."
+ readme = "README.md"
+ license = { text = "MIT" }
+diff --git a/src/octop_harness/agent.py b/src/octop_harness/agent.py
+--- a/src/octop_harness/agent.py
++++ b/src/octop_harness/agent.py
+@@ -830,6 +830,50 @@
+             base_messages = await self._read_history_from_graph_state(config)
+             return base_messages[-limit:] if base_messages else []
+ 
++    async def aget_effective_messages(self, thread_id: str) -> list[BaseMessage]:
++        """Return an independent snapshot of the current conversation context.
++
++        Unlike :meth:`aget_history`, this reads the merged graph state without
++        pagination and applies the runtime summarization event: the current
++        summary plus the retained tail, or all messages before compaction.
++        Returned messages are deep copies, suitable for seeding a new thread
++        with :meth:`aappend_messages`. No other graph state or offload identity
++        is copied. This does not include the system prompt or workspace files.
++
++        Returns an empty list when checkpointing is disabled or no history
++        exists. Checkpoint read errors propagate. Busy streams, pending graph
++        execution and HITL interrupts raise ``RuntimeError``; hosts must also
++        serialize their own invocations against the source snapshot.
++        """
++        from langchain_core.messages import BaseMessage
++
++        tid = thread_id.strip()
++        if not tid:
++            raise ValueError("thread_id must not be empty")
++        if tid in self._cancel_events or tid in self._hitl_resume_configs:
++            raise RuntimeError("cannot snapshot a busy or interrupted thread")
++        if not self._checkpointer_instance:
++            return []
++        async with self.checkpoint_activity(tid):
++            state = await self._graph.aget_state({"configurable": {"thread_id": tid}})
++            if (
++                tid in self._cancel_events
++                or tid in self._hitl_resume_configs
++                or bool(getattr(state, "next", ()))
++                or bool(getattr(state, "interrupts", ()))
++                or any(getattr(task, "interrupts", ()) for task in getattr(state, "tasks", ()))
++            ):
++                raise RuntimeError("cannot snapshot a busy or interrupted thread")
++            values = state.values if state is not None else {}
++            messages = (values or {}).get("messages") or []
++            event = (values or {}).get("_summarization_event")
++            if event is not None:
++                apply_event = getattr(self._summarization_mw, "_apply_event_to_messages", None)
++                if not callable(apply_event):
++                    raise RuntimeError("cannot reconstruct effective context without summarization middleware")
++                messages = apply_event(messages, event)
++            return deepcopy([message for message in messages if isinstance(message, BaseMessage)])
++
+     async def aappend_messages(
+         self,
+         thread_id: str,
+diff --git a/src/octop_harness/config/__init__.py b/src/octop_harness/config/__init__.py
+--- a/src/octop_harness/config/__init__.py
++++ b/src/octop_harness/config/__init__.py
+@@ -48,11 +48,12 @@
+ 
+ ProtocolName = Literal["openai", "anthropic", "bedrock"]
+ InputModality = Literal["text", "image", "audio", "video"]
+-MediaProviderName = Literal["volcengine", "dashscope", "minimax"]
++MediaProviderName = Literal["volcengine", "dashscope", "minimax", "openai_images"]
+ 
+ DEFAULT_CONFIG_FILENAME = "octop-harness.json"
+ 
+ _MEDIA_PROVIDER_DEFAULTS: dict[str, tuple[str, str, str, str]] = {
++    "openai_images": ("OPENAI_API_KEY", "https://api.openai.com/v1", "gpt-image-2", ""),
+     "volcengine": (
+         "ARK_API_KEY",
+         "https://ark.cn-beijing.volces.com/api/v3",
+@@ -81,6 +82,7 @@
+     The instance ``id`` is a routing key, while ``provider`` selects the
+     built-in protocol adapter. Multiple instances may therefore use the same
+     adapter with different credentials, endpoints, or model versions.
++    The image-only ``openai_images`` protocol always disables ``video_enabled``.
+     """
+ 
+     id: str
+@@ -112,6 +114,8 @@
+             self.image_model = defaults[2]
+         if not self.video_model:
+             self.video_model = defaults[3]
++        if self.provider == "openai_images":
++            self.video_enabled = False
+         if not self.base_url.startswith(("https://", "http://")):
+             raise ValueError(f"MediaProviderConfig({self.id}).base_url must be an HTTP(S) URL")
+         if self.enabled and not self.image_enabled and not self.video_enabled:
+@@ -204,6 +208,8 @@
+                 self.video_model = provider_defaults[3]
+         if not self.api_key_env:
+             raise ValueError("MediaGenerationConfig.api_key_env is required")
++        if self.provider == "openai_images":
++            self.video_enabled = False
+         if not self.base_url.startswith(("https://", "http://")):
+             raise ValueError("MediaGenerationConfig.base_url must be an HTTP(S) URL")
+         if not self.providers and not self.image_enabled and not self.video_enabled:
+diff --git a/src/octop_harness/media/__init__.py b/src/octop_harness/media/__init__.py
+--- a/src/octop_harness/media/__init__.py
++++ b/src/octop_harness/media/__init__.py
+@@ -18,6 +18,7 @@
+ )
+ from octop_harness.media.providers.dashscope import DashScopeMediaProvider
+ from octop_harness.media.providers.minimax import MiniMaxMediaProvider
++from octop_harness.media.providers.openai_images import OpenAIImagesMediaProvider
+ from octop_harness.media.providers.volcengine import VolcengineMediaProvider
+ from octop_harness.media.registry import BUILTIN_MEDIA_PROVIDERS, create_media_manager, create_media_provider
+ 
+@@ -39,6 +40,7 @@
+     "MediaRouteInfo",
+     "MediaSubmission",
+     "MiniMaxMediaProvider",
++    "OpenAIImagesMediaProvider",
+     "ProviderTask",
+     "RemoteArtifact",
+     "StoredMedia",
+diff --git a/src/octop_harness/media/http.py b/src/octop_harness/media/http.py
+--- a/src/octop_harness/media/http.py
++++ b/src/octop_harness/media/http.py
+@@ -1,9 +1,9 @@
+-"""Shared Bearer-authenticated JSON transport for media providers."""
++"""Shared Bearer-authenticated JSON and multipart transport for media providers."""
+ 
+ from __future__ import annotations
+ 
+ import contextlib
+-from collections.abc import Mapping
++from collections.abc import Mapping, Sequence
+ from typing import Any, cast
+ from urllib.parse import urlsplit
+ 
+@@ -15,7 +15,7 @@
+ 
+ 
+ class BearerJsonMediaProvider(BaseMediaProvider):
+-    """Common HTTP behavior for the built-in domestic media providers."""
++    """Common HTTP behavior for the built-in media providers."""
+ 
+     async def _request_json(
+         self,
+@@ -24,18 +24,24 @@
+         path: str,
+         *,
+         json: dict[str, Any] | None = None,
++        data: dict[str, str] | None = None,
++        files: Sequence[tuple[str, tuple[str, bytes, str]]] | None = None,
+         headers: Mapping[str, str] | None = None,
+         provider_task_id: str | None = None,
+     ) -> dict[str, Any]:
+         request_headers = self._auth_headers()
+         if headers:
+             request_headers.update(headers)
++        if files:
++            request_headers.pop("Content-Type", None)
+         try:
+             response = await client.request(
+                 method,
+                 f"{self._config.base_url.rstrip('/')}{path}",
+                 headers=request_headers,
+                 json=json,
++                data=data,
++                files=files,
+             )
+         except httpx.TimeoutException as exc:
+             raise MediaGenerationError(
+diff --git a/src/octop_harness/media/providers/__init__.py b/src/octop_harness/media/providers/__init__.py
+--- a/src/octop_harness/media/providers/__init__.py
++++ b/src/octop_harness/media/providers/__init__.py
+@@ -2,6 +2,7 @@
+ 
+ from octop_harness.media.providers.dashscope import DashScopeMediaProvider
+ from octop_harness.media.providers.minimax import MiniMaxMediaProvider
++from octop_harness.media.providers.openai_images import OpenAIImagesMediaProvider
+ from octop_harness.media.providers.volcengine import VolcengineMediaProvider
+ 
+-__all__ = ["DashScopeMediaProvider", "MiniMaxMediaProvider", "VolcengineMediaProvider"]
++__all__ = ["DashScopeMediaProvider", "MiniMaxMediaProvider", "OpenAIImagesMediaProvider", "VolcengineMediaProvider"]
+diff --git a/src/octop_harness/media/registry.py b/src/octop_harness/media/registry.py
+--- a/src/octop_harness/media/registry.py
++++ b/src/octop_harness/media/registry.py
+@@ -10,12 +10,14 @@
+ from octop_harness.media.manager import MediaJobStore, MediaManager
+ from octop_harness.media.providers.dashscope import DashScopeMediaProvider
+ from octop_harness.media.providers.minimax import MiniMaxMediaProvider
++from octop_harness.media.providers.openai_images import OpenAIImagesMediaProvider
+ from octop_harness.media.providers.volcengine import VolcengineMediaProvider
+ 
+ BUILTIN_MEDIA_PROVIDERS: dict[str, type[BaseMediaProvider]] = {
+     "volcengine": VolcengineMediaProvider,
+     "dashscope": DashScopeMediaProvider,
+     "minimax": MiniMaxMediaProvider,
++    "openai_images": OpenAIImagesMediaProvider,
+ }
+ 
+ 
+diff --git a/src/octop_harness/middleware/model_retry.py b/src/octop_harness/middleware/model_retry.py
+--- a/src/octop_harness/middleware/model_retry.py
++++ b/src/octop_harness/middleware/model_retry.py
+@@ -2,8 +2,41 @@
+ 
+ from __future__ import annotations
+ 
++from collections.abc import Awaitable, Callable
++from typing import Any
++
++from langchain.agents.middleware import ModelRequest, ModelResponse
+ from langchain.agents.middleware import ModelRetryMiddleware as BaseModelRetryMiddleware
+ from langchain_core.messages import AIMessage
++
++
++def _validate_response(response: ModelResponse[Any]) -> ModelResponse[Any]:
++    """Reject incomplete provider replies inside the retry budget."""
++    for message in response.result:
++        if not isinstance(message, AIMessage):
++            continue
++        metadata = message.response_metadata
++        if metadata.get("finish_reason") == "error" or metadata.get("stop_reason") == "error":
++            raise ValueError("Model response ended with an error")
++        if (
++            message.tool_calls
++            or message.invalid_tool_calls
++            or message.text.strip()
++            or message.additional_kwargs.get("refusal")
++            or message.additional_kwargs.get("audio")
++            or metadata.get("stop_reason") == "refusal"
++        ):
++            return response
++        if isinstance(message.content, list) and any(
++            isinstance(block, dict)
++            and block.get("type") in {"image", "image_url", "audio", "video", "file", "refusal"}
++            and any(value for key, value in block.items() if key != "type")
++            for block in message.content
++        ):
++            return response
++    if response.structured_response is not None:
++        return response
++    raise ValueError("Model returned no usable response")
+ 
+ 
+ class ModelRetryMiddleware(BaseModelRetryMiddleware):
+@@ -13,6 +46,26 @@
+     HarnessAgent itself uses ``on_failure="error"`` and never emits this reply.
+     """
+ 
++    def wrap_model_call(
++        self,
++        request: ModelRequest[Any],
++        handler: Callable[[ModelRequest[Any]], ModelResponse[Any]],
++    ) -> ModelResponse[Any] | AIMessage:
++        def checked(current: ModelRequest[Any]) -> ModelResponse[Any]:
++            return _validate_response(handler(current))
++
++        return super().wrap_model_call(request, checked)
++
++    async def awrap_model_call(
++        self,
++        request: ModelRequest[Any],
++        handler: Callable[[ModelRequest[Any]], Awaitable[ModelResponse[Any]]],
++    ) -> ModelResponse[Any] | AIMessage:
++        async def checked(current: ModelRequest[Any]) -> ModelResponse[Any]:
++            return _validate_response(await handler(current))
++
++        return await super().awrap_model_call(request, checked)
++
+     @staticmethod
+     def _format_failure_message(exc: Exception, attempts_made: int) -> AIMessage:
+         message = BaseModelRetryMiddleware._format_failure_message(exc, attempts_made)
+diff --git a/src/octop_harness/protocols/langgraph.py b/src/octop_harness/protocols/langgraph.py
+--- a/src/octop_harness/protocols/langgraph.py
++++ b/src/octop_harness/protocols/langgraph.py
+@@ -207,25 +207,15 @@
+         config: dict[str, Any],
+         **kwargs: Any,
+     ) -> AsyncGenerator[dict[str, Any], None]:
+-        splitter = ThinkSplitter()
+         async with aclosing(
+             _guarded_checkpoint_stream(
+-                self._graph.astream(
+-                    {"messages": messages},
+-                    config=config,
+-                    stream_mode=["values", "updates", "messages", "custom"],
+-                    version="v2",
+-                    **self._durability_options(kwargs),
+-                ),
++                self._stream_graph({"messages": messages}, config, **kwargs),
+                 getattr(self._graph, "checkpointer", None),
+                 str((config.get("configurable") or {}).get("thread_id") or ""),
+             )
+-        ) as graph_chunks:
+-            async for chunk in graph_chunks:
+-                for event in self._project_chunk(chunk, splitter):
+-                    yield event
+-        for event in self._drain_splitter(splitter):
+-            yield event
++        ) as events:
++            async for event in events:
++                yield event
+ 
+     async def resume_stream(
+         self,
+@@ -239,25 +229,72 @@
+         configurable["thread_id"] = thread_id
+         merged_config["configurable"] = configurable
+ 
+-        splitter = ThinkSplitter()
+         async with aclosing(
+             _guarded_checkpoint_stream(
+-                self._graph.astream(
+-                    Command(resume={"decisions": decisions}),
+-                    config=merged_config,
+-                    stream_mode=["values", "updates", "messages", "custom"],
+-                    version="v2",
+-                    **self._durability_options(kwargs),
+-                ),
++                self._stream_graph(None, merged_config, decisions=decisions, **kwargs),
+                 getattr(self._graph, "checkpointer", None),
+                 thread_id,
+             )
+-        ) as graph_chunks:
+-            async for chunk in graph_chunks:
++        ) as events:
++            async for event in events:
++                yield event
++
++    async def _stream_graph(
++        self,
++        graph_input: Any,
++        config: dict[str, Any],
++        *,
++        decisions: list[dict[str, Any]] | None = None,
++        **kwargs: Any,
++    ) -> AsyncGenerator[dict[str, Any], None]:
++        # This entire read/execute/project cycle runs inside checkpoint_activity.
++        if decisions is not None:
++            state = await self._graph.aget_state(config)
++            interrupts = state.interrupts
++            resume: dict[str, Any] = {"decisions": decisions}
++            if interrupts:
++                counts = [len(_serialize_hitl_request(item.value).get("action_requests", [])) for item in interrupts]
++                if any(count == 0 for count in counts) or sum(counts) != len(decisions):
++                    raise ValueError("HITL decision count does not match pending action requests")
++                resume = {}
++                offset = 0
++                for item, count in zip(interrupts, counts, strict=True):
++                    resume[item.id] = {"decisions": decisions[offset : offset + count]}
++                    offset += count
++            graph_input = Command(resume=resume)
++
++        splitter = ThinkSplitter()
++        pending: list[dict[str, Any]] = []
++        async with aclosing(
++            self._graph.astream(
++                graph_input,
++                config=config,
++                stream_mode=["values", "updates", "messages", "custom"],
++                version="v2",
++                **self._durability_options(kwargs),
++            )
++        ) as chunks:
++            async for chunk in chunks:
+                 for event in self._project_chunk(chunk, splitter):
+-                    yield event
++                    if event["type"] == AgentEventType.HITL_REQUIRED:
++                        pending.append(event["request"])
++                    else:
++                        yield event
+         for event in self._drain_splitter(splitter):
+             yield event
++        if pending:
++            if len(pending) > 1:
++                # Send tasks finish out of order. Use checkpoint order both here
++                # and on resume, including after a process/protocol restart.
++                state = await self._graph.aget_state(config)
++                pending = [_serialize_hitl_request(item.value) for item in state.interrupts]
++            request = pending[0]
++            if len(pending) > 1:
++                request = {
++                    "action_requests": [action for item in pending for action in item["action_requests"]],
++                    "review_configs": [review for item in pending for review in item.get("review_configs", [])],
++                }
++            yield {"type": AgentEventType.HITL_REQUIRED, "request": request}
+ 
+     @staticmethod
+     def _drain_splitter(splitter: ThinkSplitter) -> list[dict[str, Any]]:
+diff --git a/tests/test_protocols/test_langgraph.py b/tests/test_protocols/test_langgraph.py
+--- a/tests/test_protocols/test_langgraph.py
++++ b/tests/test_protocols/test_langgraph.py
+@@ -22,6 +22,7 @@
+         monkeypatch.setenv("OCTOP_CHECKPOINT_DURABILITY", setting)
+     graph = MagicMock()
+     graph.ainvoke = AsyncMock(return_value={})
++    graph.aget_state = AsyncMock(return_value=MagicMock(interrupts=()))
+     graph.astream_events = AsyncMock()
+     streamed = []
+ 
+diff --git a/src/octop_harness/media/providers/openai_images.py b/src/octop_harness/media/providers/openai_images.py
+new file mode 100644
+--- /dev/null
++++ b/src/octop_harness/media/providers/openai_images.py
+@@ -0,0 +1,113 @@
++"""OpenAI Images API adapter for synchronous GPT Image generation and edits."""
++
++from __future__ import annotations
++
++import base64
++from collections.abc import Mapping
++from typing import Any
++
++import httpx
++
++from octop_harness.media.errors import MediaGenerationError
++from octop_harness.media.http import BearerJsonMediaProvider, detect_media, provider_payload_error
++from octop_harness.media.models import (
++    ImageGenerationRequest,
++    MediaCapabilities,
++    MediaJobUpdate,
++    MediaSubmission,
++    ProviderTask,
++    RemoteArtifact,
++    VideoGenerationRequest,
++)
++
++
++class OpenAIImagesMediaProvider(BearerJsonMediaProvider):
++    """Call OpenAI Images endpoints; this protocol does not support video."""
++
++    provider_id = "openai_images"
++    capabilities = MediaCapabilities(video_generation=False, image_references=True)
++
++    async def _submit_image(
++        self,
++        client: httpx.AsyncClient,
++        request: ImageGenerationRequest,
++    ) -> MediaSubmission:
++        body: dict[str, Any] = {
++            "model": self.image_model,
++            "prompt": request.prompt,
++            "n": request.count,
++            "output_format": "png",
++        }
++        if request.size:
++            body["size"] = request.size
++        if len(request.reference_images) > 16:
++            raise MediaGenerationError("OpenAI accepts at most 16 reference images", code="invalid_request")
++        if request.reference_images:
++            field = "image[]" if len(request.reference_images) > 1 else "image"
++            files = []
++            for index, reference in enumerate(request.reference_images):
++                data, media_type, extension = await self._reference_image(client, reference)
++                files.append((field, (f"reference-{index}.{extension}", data, media_type)))
++            payload = await self._request_json(
++                client, "POST", "/images/edits", data={key: str(value) for key, value in body.items()}, files=files
++            )
++        else:
++            payload = await self._request_json(client, "POST", "/images/generations", json=body)
++        return MediaSubmission(artifacts=_image_artifacts(payload))
++
++    async def _reference_image(self, client: httpx.AsyncClient, reference: str) -> tuple[bytes, str, str]:
++        if reference.startswith("data:"):
++            header, separator, encoded = reference.partition(",")
++            try:
++                if not separator or not header.endswith(";base64"):
++                    raise ValueError("expected a base64 data URL")
++                data = base64.b64decode(encoded, validate=True)
++            except ValueError as exc:
++                raise MediaGenerationError("Invalid reference image data URL", code="invalid_request") from exc
++        else:
++            data = await self._download(client, reference)
++        media_type, extension = detect_media(data, fallback_type="application/octet-stream", fallback_extension="bin")
++        if media_type not in {"image/png", "image/jpeg", "image/webp"}:
++            raise MediaGenerationError("OpenAI reference images must be PNG, JPEG or WebP", code="invalid_request")
++        return data, media_type, extension
++
++    async def _submit_video(self, client: httpx.AsyncClient, request: VideoGenerationRequest) -> MediaSubmission:
++        raise MediaGenerationError("OpenAI Images does not support video generation", code="unsupported_capability")
++
++    async def _poll_task(self, client: httpx.AsyncClient, task: ProviderTask) -> MediaJobUpdate:
++        raise MediaGenerationError(
++            "OpenAI Images returns synchronous results, not tasks", code="unsupported_capability"
++        )
++
++
++def _image_artifacts(payload: Mapping[str, Any]) -> tuple[RemoteArtifact, ...]:
++    if payload.get("error"):
++        raise provider_payload_error(payload["error"], fallback="OpenAI image generation failed")
++    rows = payload.get("data")
++    if not isinstance(rows, list) or not rows:
++        raise MediaGenerationError("OpenAI image generation returned no images", code="provider_response_invalid")
++    artifacts: list[RemoteArtifact] = []
++    for row in rows:
++        if not isinstance(row, Mapping):
++            continue
++        encoded = row.get("b64_json")
++        if isinstance(encoded, str) and encoded:
++            try:
++                data = base64.b64decode(encoded, validate=True)
++            except ValueError as exc:
++                raise MediaGenerationError(
++                    "OpenAI returned invalid base64 image data", code="provider_response_invalid"
++                ) from exc
++            artifacts.append(RemoteArtifact(data=data, media_type="image/png", extension="png"))
++            continue
++        url = row.get("url")
++        if isinstance(url, str) and url:
++            artifacts.append(RemoteArtifact(url=url, media_type="image/png", extension="png"))
++    if not artifacts:
++        raise MediaGenerationError(
++            "OpenAI image generation returned no usable images", code="provider_response_invalid"
++        )
++    return tuple(artifacts)
++
++
++__all__ = ["OpenAIImagesMediaProvider"]
+diff --git a/tests/test_agent_effective_messages.py b/tests/test_agent_effective_messages.py
+new file mode 100644
+--- /dev/null
++++ b/tests/test_agent_effective_messages.py
+@@ -0,0 +1,230 @@
++"""Effective conversation snapshots without model calls or shared thread state."""
++
++from __future__ import annotations
++
++from types import SimpleNamespace
++from typing import Annotated, Any, TypedDict
++from unittest.mock import AsyncMock, MagicMock
++
++import pytest
++from deepagents.middleware.summarization import SummarizationMiddleware
++from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
++from langgraph.checkpoint.memory import MemorySaver
++from langgraph.graph import END, START, StateGraph
++from langgraph.graph.message import add_messages
++
++from octop_harness.agent import HarnessAgent
++from octop_harness.middleware.summarization_limits import harden_summarization_middleware
++
++
++@pytest.fixture
++def agent() -> HarnessAgent:
++    runtime = object.__new__(HarnessAgent)
++    runtime._checkpointer_instance = MagicMock()
++    runtime._graph = SimpleNamespace(
++        aget_state=AsyncMock(return_value=SimpleNamespace(values={}, next=(), tasks=(), interrupts=()))
++    )
++    runtime._summarization_mw = None
++    runtime._cancel_events = {}
++    runtime._hitl_resume_configs = {}
++    return runtime
++
++
++@pytest.mark.asyncio
++async def test_uncompacted_snapshot_keeps_all_messages_and_deepcopies(agent: HarnessAgent) -> None:
++    messages = [HumanMessage(content=str(index), id=f"m-{index}") for index in range(60)]
++    messages.append(
++        AIMessage(
++            content=[{"type": "text", "text": "answer"}],
++            additional_kwargs={"nested": {"items": ["parent"]}},
++        )
++    )
++    agent._graph.aget_state.return_value = SimpleNamespace(
++        values={"messages": messages}, next=(), tasks=(), interrupts=()
++    )
++
++    snapshot = await agent.aget_effective_messages(" parent ")
++
++    assert snapshot == messages
++    assert snapshot is not messages
++    assert all(copied is not source for copied, source in zip(snapshot, messages, strict=True))
++    snapshot[-1].content[0]["text"] = "child"
++    snapshot[-1].additional_kwargs["nested"]["items"].append("child")
++    assert messages[-1].content == [{"type": "text", "text": "answer"}]
++    assert messages[-1].additional_kwargs == {"nested": {"items": ["parent"]}}
++    agent._graph.aget_state.assert_awaited_once_with({"configurable": {"thread_id": "parent"}})
++
++
++@pytest.mark.asyncio
++@pytest.mark.parametrize("cutoff", [2, 200])
++async def test_compacted_snapshot_uses_runtime_summary_and_tail(
++    agent: HarnessAgent, monkeypatch: pytest.MonkeyPatch, cutoff: int
++) -> None:
++    monkeypatch.setenv("OCTOP_SUMMARY_FALLBACK_KEEP", "2")
++    agent._summarization_mw = harden_summarization_middleware(object.__new__(SummarizationMiddleware))
++    messages = [HumanMessage(content=str(index), id=f"m-{index}") for index in range(4)]
++    summary = HumanMessage(content="earlier decisions", additional_kwargs={"nested": {"items": ["parent"]}})
++    event = {"cutoff_index": cutoff, "summary_message": summary, "file_path": "/history/parent.md"}
++    agent._graph.aget_state.return_value = SimpleNamespace(
++        values={"messages": messages, "_summarization_event": event, "_summarization_session_id": "parent-session"},
++        next=(),
++        tasks=(),
++        interrupts=(),
++    )
++
++    snapshot = await agent.aget_effective_messages("parent")
++
++    assert snapshot == [summary, *messages[2:]]
++    assert snapshot[0] is not summary
++    snapshot[0].additional_kwargs["nested"]["items"].append("child")
++    assert summary.additional_kwargs == {"nested": {"items": ["parent"]}}
++    assert event["file_path"] == "/history/parent.md"
++
++
++@pytest.mark.asyncio
++async def test_compacted_snapshot_locates_cutoff_by_message_id(agent: HarnessAgent) -> None:
++    agent._summarization_mw = harden_summarization_middleware(object.__new__(SummarizationMiddleware))
++    messages = [HumanMessage(content=str(index), id=f"m-{index}") for index in range(4)]
++    summary = HumanMessage(content="earlier decisions")
++    agent._graph.aget_state.return_value = SimpleNamespace(
++        values={
++            "messages": messages,
++            "_summarization_event": {"cutoff_index": 200, "cutoff_message_id": "m-2", "summary_message": summary},
++        },
++        next=(),
++        tasks=(),
++        interrupts=(),
++    )
++
++    assert await agent.aget_effective_messages("parent") == [summary, *messages[2:]]
++
++
++@pytest.mark.asyncio
++async def test_summary_without_runtime_middleware_fails_closed(agent: HarnessAgent) -> None:
++    agent._graph.aget_state.return_value = SimpleNamespace(
++        values={
++            "messages": [HumanMessage(content="summarized raw history")],
++            "_summarization_event": {"cutoff_index": 1, "summary_message": HumanMessage(content="summary")},
++        },
++        next=(),
++        tasks=(),
++        interrupts=(),
++    )
++
++    with pytest.raises(RuntimeError, match="summarization middleware"):
++        await agent.aget_effective_messages("parent")
++
++
++@pytest.mark.asyncio
++@pytest.mark.parametrize("tracking", ["_cancel_events", "_hitl_resume_configs"])
++async def test_rejects_locally_busy_or_approval_source(agent: HarnessAgent, tracking: str) -> None:
++    getattr(agent, tracking)["parent"] = MagicMock()
++
++    with pytest.raises(RuntimeError, match=r"busy|interrupt"):
++        await agent.aget_effective_messages("parent")
++
++    agent._graph.aget_state.assert_not_awaited()
++
++
++@pytest.mark.asyncio
++@pytest.mark.parametrize(
++    "pending",
++    [
++        {"next": ("tools",)},
++        {"interrupts": (SimpleNamespace(value={"action_requests": []}),)},
++        {"tasks": (SimpleNamespace(interrupts=(SimpleNamespace(value="approve"),)),)},
++    ],
++)
++async def test_rejects_persisted_pending_or_approval_source(agent: HarnessAgent, pending: dict[str, object]) -> None:
++    fields = {"values": {"messages": [HumanMessage(content="pending")]}, "next": (), "tasks": (), "interrupts": ()}
++    fields.update(pending)
++    agent._graph.aget_state.return_value = SimpleNamespace(**fields)
++
++    with pytest.raises(RuntimeError, match=r"busy|interrupt"):
++        await agent.aget_effective_messages("parent")
++
++
++@pytest.mark.asyncio
++@pytest.mark.parametrize("values", [{}, {"messages": []}])
++async def test_missing_history_returns_empty(agent: HarnessAgent, values: dict[str, object]) -> None:
++    agent._graph.aget_state.return_value = SimpleNamespace(values=values, next=(), tasks=(), interrupts=())
++
++    assert await agent.aget_effective_messages("missing") == []
++
++
++@pytest.mark.asyncio
++async def test_disabled_checkpointer_returns_empty(agent: HarnessAgent) -> None:
++    agent._checkpointer_instance = False
++
++    assert await agent.aget_effective_messages("missing") == []
++    agent._graph.aget_state.assert_not_awaited()
++
++
++@pytest.mark.asyncio
++async def test_empty_thread_id_is_rejected(agent: HarnessAgent) -> None:
++    with pytest.raises(ValueError, match="thread_id"):
++        await agent.aget_effective_messages(" ")
++
++    agent._graph.aget_state.assert_not_awaited()
++
++
++@pytest.mark.asyncio
++async def test_checkpoint_error_is_not_reported_as_missing_history(agent: HarnessAgent) -> None:
++    agent._graph.aget_state.side_effect = OSError("checkpoint unavailable")
++
++    with pytest.raises(OSError, match="checkpoint unavailable"):
++        await agent.aget_effective_messages("parent")
++
++
++class _SnapshotState(TypedDict, total=False):
++    messages: Annotated[list[BaseMessage], add_messages]
++    _summarization_event: dict[str, Any]
++    _summarization_session_id: str
++    files: dict[str, Any]
++    todos: list[dict[str, Any]]
++
++
++@pytest.mark.asyncio
++async def test_snapshot_seeds_only_messages_and_threads_continue_independently(agent: HarnessAgent) -> None:
++    checkpointer = MemorySaver()
++    builder = StateGraph(_SnapshotState)
++    builder.add_node("finish", lambda _state: {})
++    builder.add_edge(START, "finish")
++    builder.add_edge("finish", END)
++    graph = builder.compile(checkpointer=checkpointer)
++    agent._checkpointer_instance = checkpointer
++    agent._graph = graph
++    agent._summarization_mw = harden_summarization_middleware(object.__new__(SummarizationMiddleware))
++    parent_config = {"configurable": {"thread_id": "parent"}}
++    child_config = {"configurable": {"thread_id": "child"}}
++    summary = HumanMessage(content="parent decisions", id="summary")
++    await graph.ainvoke(
++        {
++            "messages": [HumanMessage(content="evicted", id="old"), AIMessage(content="retained", id="tail")],
++            "_summarization_event": {"cutoff_index": 1, "summary_message": summary, "file_path": "/parent.md"},
++            "_summarization_session_id": "parent-offload-id",
++            "files": {"/parent.md": {"content": ["parent-only"]}},
++            "todos": [{"content": "parent task", "status": "in_progress"}],
++        },
++        parent_config,
++    )
++
++    snapshot = await agent.aget_effective_messages("parent")
++    await agent.aappend_messages("child", snapshot)
++    child = await graph.aget_state(child_config)
++    assert set(child.values) == {"messages"}
++    assert [message.content for message in child.values["messages"]] == ["parent decisions", "retained"]
++
++    await agent.aappend_messages("parent", [HumanMessage(content="parent continuation", id="parent-next")])
++    await agent.aappend_messages("child", [HumanMessage(content="child continuation", id="child-next")])
++    parent = await graph.aget_state(parent_config)
++    child = await graph.aget_state(child_config)
++    assert [message.content for message in parent.values["messages"]] == ["evicted", "retained", "parent continuation"]
++    assert [message.content for message in child.values["messages"]] == [
++        "parent decisions",
++        "retained",
++        "child continuation",
++    ]
++    assert parent.values["_summarization_session_id"] == "parent-offload-id"
++    assert parent.values["files"]["/parent.md"]["content"] == ["parent-only"]
++    assert parent.values["todos"] == [{"content": "parent task", "status": "in_progress"}]
+diff --git a/tests/test_model_response_retry.py b/tests/test_model_response_retry.py
+new file mode 100644
+--- /dev/null
++++ b/tests/test_model_response_retry.py
+@@ -0,0 +1,167 @@
++"""Provider response validation must preserve meaningful non-text replies."""
++
++from __future__ import annotations
++
++from typing import Any
++
++import pytest
++from langchain.agents.middleware import ModelResponse
++from langchain_core.messages import AIMessage
++
++from octop_harness.middleware.model_retry import ModelRetryMiddleware
++
++
++@pytest.mark.parametrize(
++    "message",
++    [
++        AIMessage(content="", additional_kwargs={"refusal": "I cannot assist with that request."}),
++        AIMessage(content=[{"type": "refusal", "refusal": "I cannot assist with that request."}]),
++        AIMessage(
++            content="",
++            invalid_tool_calls=[{"name": "lookup", "args": "{", "id": "call-1", "error": "Invalid JSON"}],
++        ),
++    ],
++    ids=["provider-refusal", "refusal-block", "invalid-tool-call"],
++)
++@pytest.mark.parametrize("asynchronous", [False, True])
++@pytest.mark.asyncio
++async def test_preserves_provider_refusals_and_invalid_tool_calls(message: AIMessage, asynchronous: bool) -> None:
++    response = ModelResponse(result=[message])
++    calls = 0
++    middleware = ModelRetryMiddleware(max_retries=2, initial_delay=0, jitter=False, on_failure="error")
++
++    def handler(_: Any) -> ModelResponse[Any]:
++        nonlocal calls
++        calls += 1
++        return response
++
++    async def ahandler(request: Any) -> ModelResponse[Any]:
++        return handler(request)
++
++    if asynchronous:
++        actual = await middleware.awrap_model_call(None, ahandler)  # type: ignore[arg-type]
++    else:
++        actual = middleware.wrap_model_call(None, handler)  # type: ignore[arg-type]
++    assert actual is response
++    assert calls == 1
++
++
++@pytest.mark.parametrize(
++    "response",
++    [
++        ModelResponse(result=[AIMessage(content="Useful answer")]),
++        ModelResponse(result=[AIMessage(content="", tool_calls=[{"name": "lookup", "args": {}, "id": "call-1"}])]),
++        ModelResponse(result=[AIMessage(content=[{"type": "image", "url": "https://example.invalid/a.png"}])]),
++        ModelResponse(result=[AIMessage(content=[{"type": "audio", "base64": "AA==", "mime_type": "audio/wav"}])]),
++        ModelResponse(result=[AIMessage(content="", response_metadata={"stop_reason": "refusal"})]),
++        ModelResponse(result=[AIMessage(content="", additional_kwargs={"audio": {"id": "audio-1", "data": "AA=="}})]),
++        ModelResponse(result=[], structured_response={}),
++        ModelResponse(result=[], structured_response=False),
++    ],
++    ids=["text", "tool", "image", "audio", "refusal-stop", "provider-audio", "structured-empty", "structured-false"],
++)
++@pytest.mark.parametrize("asynchronous", [False, True])
++@pytest.mark.asyncio
++async def test_preserves_valid_response(response: ModelResponse[Any], asynchronous: bool) -> None:
++    middleware = ModelRetryMiddleware(max_retries=0, on_failure="error")
++
++    def handler(_: Any) -> ModelResponse[Any]:
++        return response
++
++    async def ahandler(request: Any) -> ModelResponse[Any]:
++        return handler(request)
++
++    if asynchronous:
++        assert await middleware.awrap_model_call(None, ahandler) is response  # type: ignore[arg-type]
++    else:
++        assert middleware.wrap_model_call(None, handler) is response  # type: ignore[arg-type]
++
++
++@pytest.mark.parametrize(
++    "message",
++    [
++        AIMessage(content=""),
++        AIMessage(content=" "),
++        AIMessage(content="", additional_kwargs={"reasoning_content": "Thinking"}),
++        AIMessage(content=[{"type": "reasoning", "reasoning": "Thinking"}]),
++        AIMessage(content="Partial", response_metadata={"finish_reason": "error"}),
++        AIMessage(content="Partial", response_metadata={"stop_reason": "error"}),
++    ],
++    ids=["empty", "whitespace", "reasoning-extra", "reasoning-block", "finish-error", "stop-error"],
++)
++@pytest.mark.parametrize("asynchronous", [False, True])
++@pytest.mark.asyncio
++async def test_unusable_responses_consume_retry_budget(message: AIMessage, asynchronous: bool) -> None:
++    calls = 0
++    middleware = ModelRetryMiddleware(max_retries=2, initial_delay=0, jitter=False, on_failure="error")
++
++    def handler(_: Any) -> ModelResponse[Any]:
++        nonlocal calls
++        calls += 1
++        return ModelResponse(result=[message])
++
++    async def ahandler(request: Any) -> ModelResponse[Any]:
++        return handler(request)
++
++    with pytest.raises(ValueError):
++        if asynchronous:
++            await middleware.awrap_model_call(None, ahandler)  # type: ignore[arg-type]
++        else:
++            middleware.wrap_model_call(None, handler)  # type: ignore[arg-type]
++    assert calls == 3
++
++
++@pytest.mark.parametrize("streaming", [False, True])
++@pytest.mark.parametrize("recover", [False, True])
++@pytest.mark.asyncio
++async def test_graph_retries_empty_replies_without_checkpointing_them(
++    tmp_path: Any, streaming: bool, recover: bool
++) -> None:
++    from deepagents import create_deep_agent
++    from deepagents.backends import FilesystemBackend
++    from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
++    from langchain_core.messages import HumanMessage
++    from langgraph.checkpoint.memory import InMemorySaver
++
++    class Model(FakeMessagesListChatModel):
++        attempts: int = 0
++
++        def bind_tools(self, tools: Any, **kwargs: Any) -> Any:
++            return self
++
++        def _generate(self, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any) -> Any:
++            self.attempts += 1
++            return super()._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
++
++        async def _agenerate(self, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any) -> Any:
++            return self._generate(messages, stop, run_manager, **kwargs)
++
++    responses = [AIMessage(content=""), AIMessage(content="", additional_kwargs={"reasoning_content": "Thinking"})]
++    responses.append(AIMessage(content="Recovered") if recover else AIMessage(content=""))
++    model = Model(responses=responses)
++    graph = create_deep_agent(
++        model=model,
++        middleware=[ModelRetryMiddleware(max_retries=2, initial_delay=0, jitter=False, on_failure="error")],
++        checkpointer=InMemorySaver(),
++        backend=FilesystemBackend(root_dir=str(tmp_path), virtual_mode=True),
++    )
++    config = {"configurable": {"thread_id": "response-retry"}}
++
++    async def invoke() -> None:
++        inputs = {"messages": [HumanMessage(content="probe")]}
++        if streaming:
++            async for _ in graph.astream(inputs, config, stream_mode=["messages", "updates"]):
++                pass
++        else:
++            await graph.ainvoke(inputs, config)
++
++    if recover:
++        await invoke()
++    else:
++        with pytest.raises(ValueError, match="no usable response"):
++            await invoke()
++    assert model.attempts == 3
++    state = await graph.aget_state(config)
++    ai_messages = [message for message in state.values["messages"] if isinstance(message, AIMessage)]
++    assert [message.content for message in ai_messages] == (["Recovered"] if recover else [])
++    assert any(task.error for task in state.tasks) is not recover
+diff --git a/tests/test_openai_images.py b/tests/test_openai_images.py
+new file mode 100644
+--- /dev/null
++++ b/tests/test_openai_images.py
+@@ -0,0 +1,257 @@
++"""Offline tests for the OpenAI Images protocol adapter."""
++
++from __future__ import annotations
++
++import base64
++import json
++from email import message_from_bytes
++from email.policy import default
++from pathlib import Path
++
++import httpx
++import pytest
++from deepagents.backends import FilesystemBackend
++
++from octop_harness.backends.workspace import BackendWorkspace
++from octop_harness.config import MediaGenerationConfig, MediaProviderConfig
++from octop_harness.media.errors import MediaGenerationError
++from octop_harness.media.manager import MediaManager
++from octop_harness.media.models import ImageGenerationRequest, ProviderTask, VideoGenerationRequest
++from octop_harness.media.registry import create_media_manager, create_media_provider
++
++_PNG = bytes.fromhex("89504e470d0a1a0a") + b"image-bytes"
++
++
++@pytest.mark.parametrize("named", [False, True])
++def test_openai_images_defaults_are_image_only(named: bool, monkeypatch: pytest.MonkeyPatch) -> None:
++    monkeypatch.setenv("OPENAI_API_KEY", "sk-xxx")
++    config = (
++        MediaProviderConfig(id="openai-images", provider="openai_images")
++        if named
++        else MediaGenerationConfig(provider="openai_images")
++    )
++
++    assert config.base_url == "https://api.openai.com/v1"
++    assert config.api_key_env == "OPENAI_API_KEY"
++    assert config.image_model == "gpt-image-2"
++    assert config.video_model == ""
++    assert config.image_enabled is True
++    assert config.video_enabled is False
++    assert config.resolve_api_key() == "sk-xxx"
++    serialized = config.to_dict()
++    assert "api_key" not in serialized
++    assert type(config).from_dict(serialized).to_dict() == serialized
++
++
++@pytest.mark.asyncio
++async def test_generate_image_sends_images_json_and_stores_base64(tmp_path: Path) -> None:
++    def handler(request: httpx.Request) -> httpx.Response:
++        assert request.method == "POST"
++        assert str(request.url) == "https://api.openai.com/v1/images/generations"
++        assert request.headers["authorization"] == "Bearer sk-xxx"
++        assert json.loads(request.content) == {
++            "model": "gpt-image-2",
++            "prompt": "a paper boat",
++            "n": 2,
++            "size": "1024x1536",
++            "output_format": "png",
++        }
++        return httpx.Response(200, json={"data": [{"b64_json": base64.b64encode(_PNG).decode()}] * 2})
++
++    config = MediaProviderConfig(id="images", provider="openai_images", api_key="sk-xxx")
++    workspace = BackendWorkspace(FilesystemBackend(root_dir=str(tmp_path), virtual_mode=True), tmp_path)
++    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
++        provider = create_media_provider(config, client=client)
++        assert type(provider).__name__ == "OpenAIImagesMediaProvider"
++        assert provider.capabilities.image_references is True
++        assert provider.capabilities.video_generation is False
++        manager = MediaManager(workspace, output_dir="generated")
++        manager.add_provider("images", provider, video_enabled=False)
++        result = await manager.generate_image(ImageGenerationRequest(prompt="a paper boat", count=2, size="1024x1536"))
++
++    assert result.provider_type == "openai_images"
++    assert result.model == "gpt-image-2"
++    assert len(result.artifacts) == 2
++    assert all(artifact.media_type == "image/png" for artifact in result.artifacts)
++    assert all(Path(artifact.local_path).read_bytes() == _PNG for artifact in result.artifacts)
++
++
++@pytest.mark.asyncio
++@pytest.mark.parametrize("references", [("reference.png",), ("reference.png", "https://references.example/ref.png")])
++async def test_reference_edit_uploads_multipart_images(tmp_path: Path, references: tuple[str, ...]) -> None:
++    seen: list[str] = []
++
++    def handler(request: httpx.Request) -> httpx.Response:
++        seen.append(str(request.url))
++        if request.url.host == "references.example":
++            assert "authorization" not in request.headers
++            return httpx.Response(200, content=_PNG, headers={"content-type": "image/png"})
++        assert str(request.url) == "https://api.openai.com/v1/images/edits"
++        assert request.headers["authorization"] == "Bearer sk-xxx"
++        assert request.headers["content-type"].startswith("multipart/form-data; boundary=")
++        message = message_from_bytes(
++            b"Content-Type: " + request.headers["content-type"].encode() + b"\r\n\r\n" + request.content,
++            policy=default,
++        )
++        parts = list(message.iter_parts())
++        fields = {part.get_param("name", header="content-disposition"): part.get_payload(decode=True) for part in parts}
++        image_field = "image[]" if len(references) > 1 else "image"
++        assert set(fields) == {"model", "prompt", "n", "output_format", "size", image_field}
++        assert fields["model"] == b"gpt-image-2"
++        assert fields["prompt"] == b"make a paper boat"
++        assert fields["n"] == b"1"
++        assert fields["output_format"] == b"png"
++        assert fields["size"] == b"1024x1024"
++        image_parts = [part for part in parts if part.get_filename()]
++        assert len(image_parts) == len(references)
++        assert all(part.get_content_type() == "image/png" for part in image_parts)
++        assert all(part.get_payload(decode=True) == _PNG for part in image_parts)
++        return httpx.Response(200, json={"data": [{"b64_json": base64.b64encode(_PNG).decode()}]})
++
++    workspace = BackendWorkspace(FilesystemBackend(root_dir=str(tmp_path), virtual_mode=True), tmp_path)
++    workspace.upload_bytes("reference.png", _PNG)
++    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
++        provider = create_media_provider(
++            MediaProviderConfig(id="images", provider="openai_images", api_key="sk-xxx"), client=client
++        )
++        manager = MediaManager(workspace, output_dir="generated")
++        manager.add_provider("images", provider, video_enabled=False)
++        result = await manager.generate_image(
++            ImageGenerationRequest(prompt="make a paper boat", reference_images=references, size="1024x1024")
++        )
++
++    assert Path(result.artifacts[0].local_path).read_bytes() == _PNG
++    assert seen[-1] == "https://api.openai.com/v1/images/edits"
++
++
++@pytest.mark.asyncio
++async def test_openai_images_rejects_too_many_references_before_http() -> None:
++    def handler(request: httpx.Request) -> httpx.Response:
++        pytest.fail(f"Unexpected HTTP request: {request.url}")
++
++    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
++        provider = create_media_provider(
++            MediaGenerationConfig(provider="openai_images", api_key="sk-xxx"), client=client
++        )
++        with pytest.raises(MediaGenerationError, match="16 reference images") as caught:
++            await provider.submit_image(
++                ImageGenerationRequest(prompt="combine", reference_images=("https://refs.example/image.png",) * 17)
++            )
++    assert caught.value.code == "invalid_request"
++
++
++@pytest.mark.asyncio
++async def test_openai_images_video_is_disabled_without_affecting_other_routes(tmp_path: Path) -> None:
++    workspace = BackendWorkspace(FilesystemBackend(root_dir=str(tmp_path), virtual_mode=True), tmp_path)
++    config = MediaGenerationConfig(
++        providers=[
++            MediaProviderConfig(id="images", provider="openai_images", api_key="sk-xxx", video_enabled=True),
++            MediaProviderConfig(id="video", provider="minimax", api_key="sk-xxx", image_enabled=False),
++        ],
++    )
++    manager = create_media_manager(config, workspace)
++    assert manager.route_info("image").provider_type == "openai_images"
++    assert manager.route_info("video").provider_type == "minimax"
++    with pytest.raises(MediaGenerationError) as caught:
++        await manager.generate_video(VideoGenerationRequest(prompt="a boat"), provider_id="images")
++    assert caught.value.code == "media_capability_disabled"
++
++    single = create_media_manager(MediaGenerationConfig(provider="openai_images"), workspace)
++    assert single.has_route("image")
++    assert not single.has_route("video")
++
++    def handler(request: httpx.Request) -> httpx.Response:
++        pytest.fail(f"Unexpected HTTP request: {request.url}")
++
++    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
++        provider = create_media_provider(config.providers[0], client=client)
++        with pytest.raises(MediaGenerationError) as direct:
++            await provider.generate_video(VideoGenerationRequest(prompt="a boat"))
++        assert direct.value.code == "unsupported_capability"
++        with pytest.raises(MediaGenerationError, match="synchronous"):
++            await provider.poll(ProviderTask(task_id="unused", kind="image", model="gpt-image-2"))
++
++
++@pytest.mark.asyncio
++async def test_openai_images_downloads_result_url_without_bearer() -> None:
++    def handler(request: httpx.Request) -> httpx.Response:
++        if request.url.host == "cdn.example":
++            assert "authorization" not in request.headers
++            return httpx.Response(200, content=_PNG)
++        assert str(request.url) == "https://images.example/v1/images/generations"
++        assert request.headers["authorization"] == "Bearer sk-xxx"
++        assert json.loads(request.content)["model"] == "custom-image-model"
++        assert "size" not in json.loads(request.content)
++        return httpx.Response(200, json={"data": [{"url": "https://cdn.example/output.png"}]})
++
++    config = MediaGenerationConfig(
++        provider="openai_images",
++        api_key="sk-xxx",
++        base_url="https://images.example/v1/",
++        image_model="custom-image-model",
++    )
++    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
++        provider = create_media_provider(config, client=client)
++        result = await provider.generate_image(ImageGenerationRequest(prompt="a boat"))
++    assert result[0].data == _PNG
++
++
++@pytest.mark.asyncio
++@pytest.mark.parametrize("payload", [{}, {"data": []}, {"data": [None, {}]}, {"data": [{"b64_json": "!invalid!"}]}])
++async def test_openai_images_rejects_missing_or_invalid_image_data(payload: dict[str, object]) -> None:
++    def handler(request: httpx.Request) -> httpx.Response:
++        return httpx.Response(200, json=payload)
++
++    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
++        provider = create_media_provider(
++            MediaGenerationConfig(provider="openai_images", api_key="sk-xxx"), client=client
++        )
++        with pytest.raises(MediaGenerationError) as caught:
++            await provider.generate_image(ImageGenerationRequest(prompt="a boat"))
++    assert caught.value.code == "provider_response_invalid"
++
++
++@pytest.mark.asyncio
++@pytest.mark.parametrize("status", [200, 401, 429])
++async def test_openai_images_uses_shared_provider_errors(status: int) -> None:
++    def handler(request: httpx.Request) -> httpx.Response:
++        return httpx.Response(status, json={"error": {"code": "invalid_api_key", "message": "Invalid API key"}})
++
++    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
++        provider = create_media_provider(
++            MediaGenerationConfig(provider="openai_images", api_key="sk-xxx"), client=client
++        )
++        with pytest.raises(MediaGenerationError) as caught:
++            await provider.generate_image(ImageGenerationRequest(prompt="a boat"))
++    assert caught.value.code in {"credential_invalid", "rate_limited"}
++
++
++@pytest.mark.asyncio
++async def test_openai_images_missing_credentials_prevents_http(monkeypatch: pytest.MonkeyPatch) -> None:
++    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
++
++    def handler(request: httpx.Request) -> httpx.Response:
++        pytest.fail(f"Unexpected HTTP request: {request.url}")
++
++    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
++        provider = create_media_provider(MediaGenerationConfig(provider="openai_images"), client=client)
++        with pytest.raises(MediaGenerationError) as caught:
++            await provider.generate_image(ImageGenerationRequest(prompt="a boat"))
++    assert caught.value.code == "credential_missing"
++
++
++@pytest.mark.asyncio
++@pytest.mark.parametrize(
++    "reference", ["data:image/png;broken", "data:image/png;base64,!!", "data:image/gif;base64,R0lGODlh"]
++)
++async def test_openai_images_rejects_invalid_reference_images(reference: str) -> None:
++    def handler(request: httpx.Request) -> httpx.Response:
++        pytest.fail(f"Unexpected HTTP request: {request.url}")
++
++    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
++        provider = create_media_provider(
++            MediaGenerationConfig(provider="openai_images", api_key="sk-xxx"), client=client
++        )
++        with pytest.raises(MediaGenerationError) as caught:
++            await provider.generate_image(ImageGenerationRequest(prompt="a boat", reference_images=(reference,)))
++    assert caught.value.code == "invalid_request"
+diff --git a/tests/test_protocols/test_parallel_hitl.py b/tests/test_protocols/test_parallel_hitl.py
+new file mode 100644
+--- /dev/null
++++ b/tests/test_protocols/test_parallel_hitl.py
+@@ -0,0 +1,149 @@
++"""Exercise independent interrupts produced by real create_agent Send fanout."""
++
++from __future__ import annotations
++
++import asyncio
++from typing import Any
++
++import pytest
++from langchain.agents import create_agent
++from langchain.agents.middleware import HumanInTheLoopMiddleware
++from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
++from langchain_core.messages import AIMessage, HumanMessage
++from langchain_core.tools import StructuredTool
++from langgraph.checkpoint.memory import InMemorySaver
++from langgraph.types import interrupt
++
++from octop_harness.protocols.langgraph import LangGraphProtocol
++
++
++class ToolCallingModel(FakeMessagesListChatModel):
++    def bind_tools(self, *args: Any, **kwargs: Any) -> ToolCallingModel:
++        return self
++
++
++def _agent(writes: list[str], *, batch_first: bool = False) -> Any:
++    async def write(value: str) -> str:
++        # Finish in reverse order: projection and resume must still agree.
++        if value == "one":
++            await asyncio.sleep(0.01)
++        values = [value, f"{value}-extra"] if batch_first and value == "one" else [value]
++        response = interrupt(
++            {
++                "action_requests": [{"name": "write", "args": {"value": item}} for item in values],
++                "review_configs": [
++                    {"action_name": "write", "allowed_decisions": ["approve", "reject"]} for _ in values
++                ],
++            }
++        )
++        for item, decision in zip(values, response["decisions"], strict=True):
++            if decision == {"type": "approve"}:
++                writes.append(item)
++        return "reviewed"
++
++    tool = StructuredTool.from_function(name="write", description="Write after review", coroutine=write)
++    request = AIMessage(
++        content="", tool_calls=[{"id": v, "name": "write", "args": {"value": v}} for v in ("one", "two")]
++    )
++    return create_agent(
++        ToolCallingModel(responses=[request, AIMessage(content="done")]),
++        tools=[tool],
++        checkpointer=InMemorySaver(),
++    )
++
++
++@pytest.mark.parametrize("decisions", [("approve", "reject"), ("reject", "approve"), ("approve", "approve")])
++async def test_parallel_interrupts_are_one_review_and_resume_by_id(decisions: tuple[str, str]) -> None:
++    writes: list[str] = []
++    graph = _agent(writes)
++    config = {"configurable": {"thread_id": "parallel"}}
++    events = [event async for event in LangGraphProtocol(graph=graph).stream([HumanMessage(content="write")], config)]
++    state = await graph.aget_state(config)
++    assert len(state.interrupts) == 2
++    assert len(state.tasks) == 2
++    assert all(task.name == "tools" and task.path[0] == "__pregel_push" for task in state.tasks)
++    assert writes == []
++    hitl = [event["request"] for event in events if event["type"] == "hitl_required"]
++    assert len(hitl) == 1
++    assert [action["args"]["value"] for action in hitl[0]["action_requests"]] == ["one", "two"]
++    assert len(hitl[0]["review_configs"]) == 2
++    # A fresh protocol instance must recover the mapping from the checkpoint.
++    resumed = [
++        event
++        async for event in LangGraphProtocol(graph=graph).resume_stream(
++            "parallel", [{"type": decision} for decision in decisions], {}
++        )
++    ]
++    assert not [event for event in resumed if event["type"] == "hitl_required"]
++    assert sorted(writes) == [
++        value for value, decision in zip(("one", "two"), decisions, strict=True) if decision == "approve"
++    ]
++    assert not (await graph.aget_state(config)).interrupts
++
++
++@pytest.mark.parametrize("count", [0, 1, 3])
++async def test_parallel_decision_count_mismatch_executes_nothing(count: int) -> None:
++    writes: list[str] = []
++    graph = _agent(writes)
++    config = {"configurable": {"thread_id": "mismatch"}}
++    _ = [event async for event in LangGraphProtocol(graph=graph).stream([HumanMessage(content="write")], config)]
++    with pytest.raises(ValueError, match="decision"):
++        _ = [
++            event
++            async for event in LangGraphProtocol(graph=graph).resume_stream(
++                "mismatch", [{"type": "approve"}] * count, {}
++            )
++        ]
++    assert writes == []
++    assert len((await graph.aget_state(config)).interrupts) == 2
++
++
++async def test_parallel_interrupts_slice_multi_action_batches() -> None:
++    writes: list[str] = []
++    graph = _agent(writes, batch_first=True)
++    config = {"configurable": {"thread_id": "mixed-batches"}}
++    events = [event async for event in LangGraphProtocol(graph=graph).stream([HumanMessage(content="write")], config)]
++    request = next(event["request"] for event in events if event["type"] == "hitl_required")
++    assert [action["args"]["value"] for action in request["action_requests"]] == ["one", "one-extra", "two"]
++    _ = [
++        event
++        async for event in LangGraphProtocol(graph=graph).resume_stream(
++            "mixed-batches", [{"type": decision} for decision in ("approve", "reject", "approve")], {}
++        )
++    ]
++    assert sorted(writes) == ["one", "two"]
++    assert not (await graph.aget_state(config)).interrupts
++
++
++async def test_single_middleware_interrupt_keeps_its_batched_decisions() -> None:
++    writes: list[str] = []
++
++    async def write(value: str) -> str:
++        writes.append(value)
++        return "written"
++
++    tool = StructuredTool.from_function(name="write", description="Write after review", coroutine=write)
++    request = AIMessage(
++        content="", tool_calls=[{"id": value, "name": "write", "args": {"value": value}} for value in ("one", "two")]
++    )
++    graph = create_agent(
++        ToolCallingModel(responses=[request, AIMessage(content="done")]),
++        tools=[tool],
++        middleware=[HumanInTheLoopMiddleware(interrupt_on={"write": True})],
++        checkpointer=InMemorySaver(),
++    )
++    config = {"configurable": {"thread_id": "middleware-batch"}}
++    events = [event async for event in LangGraphProtocol(graph=graph).stream([HumanMessage(content="write")], config)]
++    assert len((await graph.aget_state(config)).interrupts) == 1
++    reviews = [event["request"] for event in events if event["type"] == "hitl_required"]
++    assert len(reviews) == 1
++    assert len(reviews[0]["action_requests"]) == 2
++    assert writes == []
++    _ = [
++        event
++        async for event in LangGraphProtocol(graph=graph).resume_stream(
++            "middleware-batch", [{"type": "approve"}, {"type": "reject"}], {}
++        )
++    ]
++    assert writes == ["one"]
++    assert not (await graph.aget_state(config)).interrupts

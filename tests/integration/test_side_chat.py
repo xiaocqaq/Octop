@@ -314,6 +314,38 @@ async def test_ws_ignores_spoofed_session_keys_and_excludes_memory(env: Any) -> 
     assert tid == source and key == main
 
 
+async def test_ws_auto_supplies_required_reasoning_effort(
+    env: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    c, srv, agent, users, aid, _source = env
+    side = await _create(env)
+    monkeypatch.setattr(
+        srv.app_runtime.agent_registry.providers,
+        "get_model_reasoning_capability",
+        lambda _ref: {
+            "adapter": "openai_reasoning_effort",
+            "toggle": False,
+            "efforts": ["low", "medium", "high"],
+        },
+    )
+    async with ws_connect(c._octop_app, chat_ws_path(aid, users["alice"])) as ws:
+        await ws.send_json(
+            {
+                "type": "user_turn",
+                "text": "side only",
+                "thread_id": side["thread_id"],
+                "model": "openai/gpt-4o",
+                "reasoning_mode": "auto",
+            }
+        )
+        frames = await ws.drain_turn()
+    assert not [f for f in frames if f.get("type") == "error"], frames
+    assert agent.last_request["thread_id"] == side["thread_id"]
+    assert agent.last_request["configurable"]["octop_reasoning_overrides"] == {
+        "model_fields": {"reasoning_effort": "medium"}
+    }
+
+
 async def test_close_retains_metadata_on_checkpoint_failure(
     env: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:

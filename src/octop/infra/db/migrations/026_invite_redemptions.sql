@@ -1,0 +1,30 @@
+-- Track cumulative registrations and cap the number of uses per invite.
+ALTER TABLE user_invites ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE user_invites ADD COLUMN max_uses INTEGER CHECK (max_uses > 0);
+ALTER TABLE user_invites ADD COLUMN use_count INTEGER NOT NULL DEFAULT 0 CHECK (use_count >= 0);
+UPDATE user_invites SET enabled = 0 WHERE used_at IS NOT NULL OR revoked_at IS NOT NULL;
+UPDATE user_invites SET max_uses = 1;
+UPDATE user_invites SET use_count = 1 WHERE used_at IS NOT NULL;
+CREATE TABLE IF NOT EXISTS user_invite_redemptions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  invite_id INTEGER NOT NULL REFERENCES user_invites(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+  redeemed_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_invite_redemptions_invite ON user_invite_redemptions(invite_id, redeemed_at, id);
+INSERT INTO user_invite_redemptions(invite_id, user_id, redeemed_at)
+SELECT id, used_by_user_id, used_at FROM user_invites
+WHERE used_by_user_id IS NOT NULL AND used_at IS NOT NULL
+ON CONFLICT(user_id) DO NOTHING;
+ALTER TABLE user_invites DROP COLUMN used_at;
+ALTER TABLE user_invites DROP COLUMN used_by_user_id;
+ALTER TABLE user_invites DROP COLUMN revoked_at;
+
+-- Side chats retain their identity after persistence.
+ALTER TABLE threads ADD COLUMN side_chat INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE threads ADD COLUMN source_thread_id TEXT;
+ALTER TABLE threads ADD COLUMN copied_messages INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE threads ADD COLUMN expires_at BIGINT;
+ALTER TABLE threads ADD COLUMN gc_claimed_at BIGINT;
+CREATE INDEX idx_threads_side_chat_expiry ON threads(expires_at) WHERE expires_at IS NOT NULL;
+UPDATE _schema_version SET version = 26;

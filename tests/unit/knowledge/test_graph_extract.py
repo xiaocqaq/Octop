@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
 from octop.infra.knowledge import graph_extract
@@ -167,6 +168,59 @@ def test_parse_rejects_replies_without_a_json_object(reply: str) -> None:
         parse_extraction(reply, ordinal=0)
 
 
+def test_extractor_sends_model_reasoning_defaults_in_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = _provider()
+    provider.kind = "openai"
+    provider.get_models = lambda: [
+        {"id": "other-chat"},
+        {
+            "id": "chat-1",
+            "reasoning_config": {
+                "adapter": "openai_reasoning_effort",
+                "toggle": False,
+                "efforts": ["low", "medium", "high"],
+                "default_effort": "high",
+            },
+        },
+    ]
+    payloads = []
+
+    def send(_client: httpx.Client, request: httpx.Request, **_kwargs: object) -> httpx.Response:
+        assert request.url == "https://llm.example/v1/chat/completions"
+        payloads.append(json.loads(request.content))
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": '{"entities":[]}'},
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    monkeypatch.setattr(httpx.Client, "send", send)
+    settings = {
+        "knowledge_graph_enabled": "true",
+        "knowledge_graph_provider_id": "7",
+        "knowledge_graph_model": "chat-1",
+    }
+    services = SimpleNamespace(
+        settings_repo=SimpleNamespace(get=settings.get), provider_repo=_repo(provider)
+    )
+
+    GraphExtractor(services)(filename="plan.md", ordinal=0, text="Apollo ships in May.")
+
+    assert len(payloads) == 1
+    assert payloads[0]["model"] == "chat-1"
+    assert payloads[0].get("reasoning_effort") == "high"
+
+
 def test_extractor_refuses_to_start_without_a_ready_model() -> None:
     services = SimpleNamespace(
         settings_repo=SimpleNamespace(get=lambda _key: None), provider_repo=_repo(None)
@@ -197,7 +251,7 @@ def test_extractor_sends_the_passage_and_parses_the_reply(
         built.append((provider, model_id))
         return _Model()
 
-    monkeypatch.setattr(graph_extract, "build_probe_chat_model", build)
+    monkeypatch.setattr(graph_extract, "build_knowledge_chat_model", build)
     provider = _provider()
     services = SimpleNamespace(
         settings_repo=SimpleNamespace(get=settings.get), provider_repo=_repo(provider)

@@ -15,6 +15,11 @@ from octop.infra.agents.providers import KIND_TO_PROTOCOL
 from octop.infra.agents.providers.headers import assemble_provider_headers
 from octop.infra.agents.providers.magpie import is_magpie_provider, magpie_catalog_model
 from octop.infra.agents.providers.presets import load_provider_presets
+from octop.infra.agents.providers.reasoning import (
+    apply_reasoning_overrides,
+    reasoning_capability,
+    reasoning_request_parameters,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +53,24 @@ def build_probe_chat_model(
     api_fallback: str | None = None,
 ) -> Any:
     """Construct a chat model from a provider row for probing."""
+    return _build_provider_chat_model(
+        row, model_id=model_id, api_mode=api_mode, api_fallback=api_fallback
+    )
+
+
+def build_knowledge_chat_model(row: Any, *, model_id: str) -> Any:
+    """Construct the configured knowledge model with its reasoning defaults."""
+    return _build_provider_chat_model(row, model_id=model_id, use_reasoning_defaults=True)
+
+
+def _build_provider_chat_model(
+    row: Any,
+    *,
+    model_id: str | None,
+    api_mode: str | None = None,
+    api_fallback: str | None = None,
+    use_reasoning_defaults: bool = False,
+) -> Any:
     from octop_harness.config import ModelConfig, ProviderConfig
     from octop_harness.llm.factory import build_chat_model
 
@@ -89,7 +112,12 @@ def build_probe_chat_model(
             extra=extra,
         ),
     )
-    return build_chat_model(provider, model)
+    chat = build_chat_model(provider, model)
+    if not use_reasoning_defaults:
+        return chat
+    capability = reasoning_capability(model_data, base_url=base_url)
+    overrides = reasoning_request_parameters(capability, mode=None, effort=None)
+    return apply_reasoning_overrides(chat, overrides)
 
 
 def make_probe_provider_row(

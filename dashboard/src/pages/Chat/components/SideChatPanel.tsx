@@ -6,6 +6,10 @@ import type { OctopThread } from "../../../api/modules/octopThreads";
 import type { ResolvedModel } from "../../../api/types";
 import type { HitlDecisionHandler } from "../../../api/types/hitl";
 import { useChat, type ChatAttachment } from "../hooks/useChat";
+import {
+  ChatFilePreviewProvider,
+  useChatFilePreview,
+} from "../ChatFilePreviewContext";
 import * as chatStore from "../hooks/chatStore";
 import { buildComposerContext } from "../utils/chatMessages";
 import {
@@ -36,11 +40,19 @@ export interface SideChatPanelProps {
 }
 
 export default function SideChatPanel(props: SideChatPanelProps) {
-  return (
+  const filePreview = useChatFilePreview();
+  const content = (
     <SideChatPanelContent
       key={`${props.agentId}:${props.thread.thread_id}`}
       {...props}
     />
+  );
+  return filePreview ? (
+    <ChatFilePreviewProvider {...filePreview} threadId={props.thread.thread_id}>
+      {content}
+    </ChatFilePreviewProvider>
+  ) : (
+    content
   );
 }
 

@@ -1,4 +1,7 @@
+from langchain_openai import ChatOpenAI
+
 from octop.infra.agents.providers.reasoning import (
+    apply_reasoning_overrides,
     reasoning_capability,
     reasoning_request_parameters,
 )
@@ -75,6 +78,29 @@ def test_openai_adapter_maps_disable_to_none_effort_without_thinking() -> None:
     assert reasoning_request_parameters(capability, mode="disabled", effort=None) == {
         "model_fields": {"reasoning_effort": "none"}
     }
+
+
+def test_auto_sends_default_effort_for_model_that_cannot_disable_reasoning() -> None:
+    capability = reasoning_capability(
+        {
+            "id": "required-reasoner",
+            "reasoning_config": {
+                "adapter": "openai_reasoning_effort",
+                "toggle": False,
+                "efforts": ["low", "medium", "high"],
+            },
+        }
+    )
+    assert reasoning_request_parameters(capability, mode="auto", effort=None) == {
+        "model_fields": {"reasoning_effort": "medium"}
+    }
+
+
+def test_auto_leaves_reasoning_to_provider_for_optional_models() -> None:
+    capability = reasoning_capability(
+        {"id": "optional-reasoner", "reasoning_config": {"adapter": "openai_reasoning_effort"}}
+    )
+    assert reasoning_request_parameters(capability, mode="auto", effort=None) == {}
 
 
 def test_anthropic_adaptive_uses_native_model_fields() -> None:
@@ -167,3 +193,44 @@ def test_supported_reasoning_defaults_to_enabled_for_every_adapter() -> None:
 def test_non_reasoning_model_does_not_receive_reasoning_parameters() -> None:
     assert reasoning_capability({"id": "ordinary-chat"}) is None
     assert reasoning_request_parameters(None, mode="enabled", effort=None) == {}
+
+
+def test_reasoning_overrides_copy_api_fallback_without_changing_shared_models() -> None:
+    model = ChatOpenAI(
+        model="reasoner",
+        api_key="sk-test",
+        use_responses_api=True,
+        reasoning_effort="low",
+        extra_body={"primary_setting": True},
+    )
+    fallback = ChatOpenAI(
+        model="reasoner",
+        api_key="sk-test",
+        use_responses_api=False,
+        reasoning_effort="low",
+        extra_body={"fallback_setting": True},
+    )
+    object.__setattr__(model, "_harness_api_fallback_model", fallback)
+
+    configured = apply_reasoning_overrides(
+        model,
+        {
+            "model_fields": {"reasoning_effort": "high"},
+            "extra_body": {"thinking": {"type": "enabled"}},
+        },
+    )
+    configured_fallback = getattr(configured, "_harness_api_fallback_model", None)
+    assert configured_fallback is not None
+
+    for updated, original, original_extra in (
+        (configured, model, {"primary_setting": True}),
+        (configured_fallback, fallback, {"fallback_setting": True}),
+    ):
+        assert updated is not original
+        assert updated.reasoning_effort == "high"
+        assert updated.extra_body == {**original_extra, "thinking": {"type": "enabled"}}
+        assert original.reasoning_effort == "low"
+        assert original.extra_body == original_extra
+    assert configured.use_responses_api is True
+    assert configured_fallback.use_responses_api is False
+    assert getattr(model, "_harness_api_fallback_model", None) is fallback

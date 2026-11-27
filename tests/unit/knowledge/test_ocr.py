@@ -188,7 +188,7 @@ def test_remote_ocr_sends_image_block(tmp_path: Path, monkeypatch: pytest.Monkey
             messages.extend(value)
             return SimpleNamespace(content="remote text")
 
-    monkeypatch.setattr(ocr, "build_probe_chat_model", lambda *_a, **_k: Model())
+    monkeypatch.setattr(ocr, "build_knowledge_chat_model", lambda *_a, **_k: Model())
     extractor = ocr._RemoteOcr(SimpleNamespace(), "vision")
 
     assert extractor(image) == "remote text"
@@ -207,7 +207,7 @@ def _remote_extractor(monkeypatch: pytest.MonkeyPatch, reply: object) -> ocr._Re
                 return SimpleNamespace(content=reply.pop(0))
             return SimpleNamespace(content=reply)
 
-    monkeypatch.setattr(ocr, "build_probe_chat_model", lambda *_a, **_k: Model())
+    monkeypatch.setattr(ocr, "build_knowledge_chat_model", lambda *_a, **_k: Model())
     return ocr._RemoteOcr(SimpleNamespace(), "vision")
 
 

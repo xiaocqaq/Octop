@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator
+from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 from typing import Any
 
@@ -42,6 +44,26 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
 @pytest.fixture(scope="session")
 def repo_root() -> Path:
     return _REPO_ROOT
+
+
+@pytest.fixture(autouse=True)
+def _cleanup_server_log_handlers() -> Iterator[None]:
+    """Close server log handlers added by each test without touching capture handlers."""
+    loggers = [
+        logging.getLogger(name) for name in ("", "uvicorn", "uvicorn.access", "uvicorn.error")
+    ]
+    saved_handlers = {logger: set(logger.handlers) for logger in loggers}
+    try:
+        yield
+    finally:
+        added_handlers: set[TimedRotatingFileHandler] = set()
+        for logger, original in saved_handlers.items():
+            for handler in list(logger.handlers):
+                if isinstance(handler, TimedRotatingFileHandler) and handler not in original:
+                    logger.removeHandler(handler)
+                    added_handlers.add(handler)
+        for handler in added_handlers:
+            handler.close()
 
 
 # Creating an agent now starts a multi-hour asyncio.sleep (proactive care

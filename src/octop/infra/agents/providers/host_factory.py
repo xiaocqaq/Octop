@@ -9,13 +9,17 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from typing import cast
+from typing import Any, cast
 
 from octop_harness.config import HarnessAgentConfig, ProviderConfig
 from octop_harness.llm.access import ModelAccess
 from octop_harness.llm.factory import ChatModelFactory
 from octop_harness.protocols.base import ChatProtocol
 
+from octop.infra.agents.providers.reasoning import (
+    apply_reasoning_overrides,
+    reasoning_request_parameters,
+)
 from octop.infra.errors import ErrorCode, OctopError
 
 logger = logging.getLogger(__name__)
@@ -28,7 +32,12 @@ def _host_protocol(_name: str | None) -> ChatProtocol:
 class HostModelFactory:
     """Harness factory whose auto route is the first enabled provider model."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        get_reasoning_capability: Callable[[str], dict[str, Any] | None] | None = None,
+    ) -> None:
+        self._get_reasoning_capability = get_reasoning_capability
         self._factory: ChatModelFactory | None = None
         self._config: HarnessAgentConfig | None = None
 
@@ -71,7 +80,23 @@ class HostModelFactory:
         if not requested or requested.lower() == "auto":
             requested = "auto"
         try:
-            return factory.get_for(requested)
+            access = factory.get_for(requested)
+            if self._get_reasoning_capability is None:
+                return access
+            capability = self._get_reasoning_capability(access.model_ref)
+            overrides = reasoning_request_parameters(
+                capability,
+                mode=None,
+                effort=None,
+            )
+            model = apply_reasoning_overrides(access.chat_model, overrides)
+            if model is access.chat_model:
+                return access
+            return ModelAccess(
+                model_ref=access.model_ref,
+                chat_model=model,
+                get_protocol=_host_protocol,
+            )
         except Exception as exc:
             logger.warning("host model unavailable spec=%s: %s", requested, exc)
             if requested == "auto":
